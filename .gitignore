@@ -1,0 +1,12 @@
+# Xcode
+.DS_Store
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+
+# CocoaPods (restore with `pod install`)
+Pods/
+
+# IDE
+.idea/
