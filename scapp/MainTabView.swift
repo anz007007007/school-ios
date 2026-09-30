@@ -297,7 +297,9 @@ struct MainTabView: View {
             .navigationDestination(item: $appState.pushRoute) { route in
                 pushDestination(route)
                     .onAppear {
+                        #if DEBUG
                         print("PUSH DESTINATION APPEARED:", route.sectionKey)
+                        #endif
                     }
                     .task {
                         await appState.markPushNotificationReadIfNeeded(route.notificationID)

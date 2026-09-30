@@ -43,10 +43,14 @@ final class APIRequestService {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("\(logPrefix) REQUEST:", method, url.absoluteString)
             print("\(logPrefix) BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("\(logPrefix) REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         do {
@@ -58,8 +62,10 @@ final class APIRequestService {
 
             let responseText = String(data: data, encoding: .utf8) ?? ""
 
+            #if DEBUG
             print("\(logPrefix) RESPONSE STATUS:", httpResponse.statusCode)
             print("\(logPrefix) RESPONSE BODY:", responseText)
+            #endif
 
             if httpResponse.statusCode == 401 {
                 AuthSessionEvents.notifySessionExpired()

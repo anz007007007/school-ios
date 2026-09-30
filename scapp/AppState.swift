@@ -125,8 +125,10 @@ enum PushRoute: Hashable, Identifiable {
 
         let joined = normalizedValues.joined(separator: " ")
 
+        #if DEBUG
         print("PUSH ROUTE VALUES:", normalizedValues)
         print("PUSH ROUTE JOINED:", joined)
+        #endif
 
         if containsAny(
             joined,
@@ -338,7 +340,10 @@ enum PushRoute: Hashable, Identifiable {
     }
 
     private static func containsAny(_ value: String, _ needles: [String]) -> Bool {
-        needles.contains { value.contains($0) }
+        let words = value.split(separator: " ")
+        return needles.contains { needle in
+            words.contains { $0.hasPrefix(needle) }
+        }
     }
 }
 
@@ -427,7 +432,9 @@ final class AppState: ObservableObject {
 
             unreadNotificationsBySection = result
         } catch {
+            #if DEBUG
             print("PUSH SECTION UNREAD BADGES ERROR:", error.localizedDescription)
+            #endif
         }
     }
 
@@ -481,12 +488,16 @@ final class AppState: ObservableObject {
     }
 
     func openPushRoute(_ route: PushRoute) {
+        #if DEBUG
         print("PUSH OPEN ROUTE:", route.sectionKey, "notificationID:", route.notificationID as Any)
+        #endif
 
         pushRoute = nil
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            #if DEBUG
             print("PUSH SET ROUTE:", route.sectionKey)
+            #endif
             self?.pushRoute = route
         }
 
@@ -519,7 +530,9 @@ final class AppState: ObservableObject {
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
             await refreshUnreadNotificationsBySection()
         } catch {
+            #if DEBUG
             print("PUSH NOTIFICATION READ FROM ROUTE ERROR:", error.localizedDescription)
+            #endif
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
             await refreshUnreadNotificationsBySection()
         }
@@ -590,7 +603,9 @@ final class AppState: ObservableObject {
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
             await refreshUnreadNotificationsBySection()
         } catch {
+            #if DEBUG
             print("PUSH SECTION NOTIFICATIONS READ ERROR:", error.localizedDescription)
+            #endif
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
             await refreshUnreadNotificationsBySection()
         }
@@ -708,7 +723,9 @@ final class AppState: ObservableObject {
             let decoded = try JSONDecoder().decode(MobileConfigResponseDTO.self, from: data)
             pushNotificationsFeatureEnabled = decoded.features?.push_notifications ?? true
         } catch {
+            #if DEBUG
             print("APP STATE MOBILE CONFIG ERROR:", error.localizedDescription)
+            #endif
         }
     }
 
