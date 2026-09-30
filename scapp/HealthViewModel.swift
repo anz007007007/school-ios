@@ -281,6 +281,11 @@ final class HealthViewModel: ObservableObject {
         print("HEALTH RESPONSE STATUS:", httpResponse.statusCode)
         print("HEALTH RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw HealthError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw HealthError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

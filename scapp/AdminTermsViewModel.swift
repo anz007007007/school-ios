@@ -234,6 +234,12 @@ final class AdminTermsViewModel: ObservableObject {
             throw AdminTermsError.badResponse
         }
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw AdminTermsError.serverError(statusCode: httpResponse.statusCode, text: text)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             let text = String(data: data, encoding: .utf8) ?? ""
             throw AdminTermsError.serverError(statusCode: httpResponse.statusCode, text: text)

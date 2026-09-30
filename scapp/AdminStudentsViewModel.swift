@@ -333,6 +333,11 @@ final class AdminStudentsViewModel: ObservableObject {
         print("ADMIN STUDENTS RESPONSE STATUS:", httpResponse.statusCode)
         print("ADMIN STUDENTS RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw AdminStudentsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw AdminStudentsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

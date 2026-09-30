@@ -850,6 +850,11 @@ final class ClubsViewModel: ObservableObject {
         print("CLUBS RESPONSE STATUS:", httpResponse.statusCode)
         print("CLUBS RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw ClubsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw ClubsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

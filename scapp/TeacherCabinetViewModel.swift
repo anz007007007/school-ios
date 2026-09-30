@@ -2133,6 +2133,11 @@ final class TeacherCabinetViewModel: ObservableObject {
         print("TEACHER RESPONSE STATUS:", httpResponse.statusCode)
         print("TEACHER RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw TeacherCabinetError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw TeacherCabinetError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

@@ -259,6 +259,12 @@ final class AdminTeachersViewModel: ObservableObject {
             throw AdminTeachersError.badResponse
         }
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw AdminTeachersError.serverError(statusCode: httpResponse.statusCode, text: text)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             let text = String(data: data, encoding: .utf8) ?? ""
             throw AdminTeachersError.serverError(statusCode: httpResponse.statusCode, text: text)

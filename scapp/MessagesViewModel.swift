@@ -797,6 +797,11 @@ final class MessagesViewModel: ObservableObject {
         print("MESSAGES RESPONSE STATUS:", httpResponse.statusCode)
         print("MESSAGES RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw MessagesError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw MessagesError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

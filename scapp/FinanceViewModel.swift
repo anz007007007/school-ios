@@ -1408,6 +1408,11 @@ final class FinanceViewModel: ObservableObject {
         print("FINANCE RESPONSE STATUS:", httpResponse.statusCode)
         print("FINANCE RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw FinanceError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw FinanceError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

@@ -204,6 +204,12 @@ final class AdminGradeTypesViewModel: ObservableObject {
             throw AdminGradeTypesError.badResponse
         }
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw AdminGradeTypesError.serverError(statusCode: httpResponse.statusCode, text: text)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             let text = String(data: data, encoding: .utf8) ?? ""
             throw AdminGradeTypesError.serverError(statusCode: httpResponse.statusCode, text: text)

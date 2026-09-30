@@ -648,6 +648,11 @@ final class SchoolMenuViewModel: ObservableObject {
         print("MENU RESPONSE STATUS:", httpResponse.statusCode)
         print("MENU RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw SchoolMenuError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw SchoolMenuError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

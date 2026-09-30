@@ -720,6 +720,11 @@ final class EventsViewModel: ObservableObject {
         print("EVENTS RESPONSE STATUS:", httpResponse.statusCode)
         print("EVENTS RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw EventsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw EventsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }

@@ -584,6 +584,11 @@ struct ProfileView: View {
         print("PROFILE AVATAR RESPONSE STATUS:", httpResponse.statusCode)
         print("PROFILE AVATAR RESPONSE BODY:", responseText)
 
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw ProfileError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw ProfileError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }
@@ -631,6 +636,11 @@ struct ProfileView: View {
 
         print("PROFILE RESPONSE STATUS:", httpResponse.statusCode)
         print("PROFILE RESPONSE BODY:", responseText)
+
+        if httpResponse.statusCode == 401 {
+            AuthSessionEvents.notifySessionExpired()
+            throw ProfileError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+        }
 
         guard (200...299).contains(httpResponse.statusCode) else {
             throw ProfileError.serverError(statusCode: httpResponse.statusCode, text: responseText)
