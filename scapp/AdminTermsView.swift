@@ -309,8 +309,8 @@ struct AdminEditTermView: View {
                 name: term.name,
                 academicYear: term.academic_year,
                 termType: term.term_type,
-                startsAt: term.starts_at,
-                endsAt: term.ends_at,
+                startsAt: AdminDateInput.display(fromISO: term.starts_at),
+                endsAt: AdminDateInput.display(fromISO: term.ends_at),
                 isActive: term.is_active
             )
         )
@@ -398,7 +398,7 @@ struct AdminEditTermView: View {
                     }
                 }
             } message: {
-                Text("Период \(term.name) будет удалён.")
+                Text("Запись «\(term.name)» будет удалена.")
             }
         }
     }

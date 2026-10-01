@@ -234,11 +234,7 @@ enum AdminGradeTypesError: LocalizedError {
         case .badResponse:
             return "Некорректный ответ сервера."
         case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            }
-
-            return "Ошибка сервера: \(statusCode). \(text)"
+            return APIRequestError.readableServerError(statusCode: statusCode, text: text)
         }
     }
 }

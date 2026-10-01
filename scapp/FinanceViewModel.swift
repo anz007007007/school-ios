@@ -131,35 +131,6 @@ final class FinanceViewModel: ObservableObject {
         overview?.overdue_invoices ?? invoices.filter { $0.status == "overdue" || $0.is_overdue == true }.count
     }
 
-    private var filtersNextMonth: FinanceNextMonthPayload? {
-        guard let nextMonth = filtersNextMonthDTO else {
-            return nil
-        }
-
-        return FinanceNextMonthPayload(
-            billingPeriod: nextMonth.billing_period,
-            periodStartsAt: nextMonth.period_starts_at,
-            periodEndsAt: nextMonth.period_ends_at,
-            dueDate: nextMonth.due_date
-        )
-    }
-
-    private var overviewNextMonth: FinanceNextMonthPayload? {
-        guard overview?.next_billing_period != nil
-                || overview?.next_period_starts_at != nil
-                || overview?.next_period_ends_at != nil
-                || overview?.next_due_date != nil else {
-            return nil
-        }
-
-        return FinanceNextMonthPayload(
-            billingPeriod: overview?.next_billing_period,
-            periodStartsAt: overview?.next_period_starts_at,
-            periodEndsAt: overview?.next_period_ends_at,
-            dueDate: overview?.next_due_date
-        )
-    }
-
     func loadInitialData(api: SchoolAPI) async {
         isLoading = true
         errorMessage = nil
@@ -197,15 +168,28 @@ final class FinanceViewModel: ObservableObject {
 
     func loadOverview(api: SchoolAPI) async {
         do {
+            // Сводка по тем же ученику и периоду, что и список счетов.
+            var queryItems: [URLQueryItem] = []
+
+            if selectedStudentID != 0 {
+                queryItems.append(URLQueryItem(name: "student_id", value: "\(selectedStudentID)"))
+            }
+
+            if selectedPeriod != "all" {
+                queryItems.append(URLQueryItem(name: "billing_period", value: selectedPeriod))
+            }
+
             let data = try await sendRequest(
                 api: api,
                 path: "/api/v1/finance/overview",
-                method: "GET"
+                method: "GET",
+                queryItems: queryItems
             )
 
             overview = try JSONDecoder().decode(FinanceOverviewResponseDTO.self, from: data)
         } catch {
-            // Не блокируем экран, если обзор не загрузился.
+            // Не блокируем экран: без сводки итоги считаются по загруженным счетам.
+            overview = nil
         }
     }
 
@@ -233,7 +217,7 @@ final class FinanceViewModel: ObservableObject {
             // Для unpaid не отправляем фильтр по статусу на сервер,
             // загружаем все счета и фильтруем на клиенте
             if selectedStatus != "all" && selectedStatus != "unpaid" {
-                queryItems.append(URLQueryItem(name: "status", value: selectedStatus))
+                queryItems.append(URLQueryItem(name: "status_filter", value: selectedStatus))
             }
 
             let data = try await sendRequest(
@@ -298,10 +282,11 @@ final class FinanceViewModel: ObservableObject {
                 method: "GET"
             )
 
-            let decoded = try JSONDecoder().decode(InvoiceItemsListResponseDTO.self, from: data)
+            let decoded = try decodeResponse(InvoiceItemsListResponseDTO.self, from: data)
             invoiceItems = decoded.items
         } catch {
             invoiceItems = []
+            errorMessage = "Не удалось загрузить детализацию счёта: \(error.localizedDescription)"
         }
     }
 
@@ -577,41 +562,28 @@ final class FinanceViewModel: ObservableObject {
         }
     }
 
-    func generateNextMonthInvoices(api: SchoolAPI) async -> Bool {
-        isSaving = true
+    /// Сервер создаёт счёт на `amountText` каждому активному ученику за следующий месяц,
+    /// поэтому сумму вводит пользователь (а не берётся из случайного счёта).
+    /// Уже выставленные за месяц счета сервер пропускает.
+    func generateNextMonthInvoices(api: SchoolAPI, amountText: String) async -> Bool {
+        guard !isSaving else {
+            return false
+        }
+
         errorMessage = nil
         successMessage = nil
 
-        guard let nextMonth = overviewNextMonth ?? filtersNextMonth else {
-            errorMessage = "Не удалось определить следующий расчётный период"
-            isSaving = false
+        guard let amount = FinanceMoney.decimal(from: amountText), amount > 0 else {
+            errorMessage = "Укажите сумму счёта больше нуля"
             return false
         }
 
-        guard let billingPeriod = nextMonth.billingPeriod,
-              let periodStartsAt = nextMonth.periodStartsAt,
-              let periodEndsAt = nextMonth.periodEndsAt,
-              let dueDate = nextMonth.dueDate else {
-            errorMessage = "Не заполнены параметры следующего месяца"
-            isSaving = false
-            return false
-        }
-
-        let amount = selectedInvoice?.amount ?? invoices.first?.amount ?? ""
-
-        guard !amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "Не удалось определить сумму для генерации счетов"
-            isSaving = false
-            return false
-        }
+        isSaving = true
 
         do {
             let body: [String: Any] = [
-                "billing_period": billingPeriod,
-                "period_starts_at": periodStartsAt,
-                "period_ends_at": periodEndsAt,
-                "due_date": dueDate,
-                "amount": amount
+                "amount": FinanceMoney.plainString(amount),
+                "overwrite_existing": false
             ]
 
             let data = try await sendRequest(
@@ -622,12 +594,7 @@ final class FinanceViewModel: ObservableObject {
             )
 
             let decoded = try? JSONDecoder().decode(FinanceNextMonthResponseDTO.self, from: data)
-
-            if let count = decoded?.created_count {
-                successMessage = "Счета на следующий месяц созданы: \(count)"
-            } else {
-                successMessage = "Счета на следующий месяц созданы"
-            }
+            successMessage = "Создано счетов: \(decoded?.created_count ?? 0), пропущено: \(decoded?.skipped_count ?? 0)"
 
             await loadFilters(api: api)
             await loadInvoices(api: api, showLoading: false)
@@ -636,10 +603,22 @@ final class FinanceViewModel: ObservableObject {
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось сгенерировать счета: \(error.localizedDescription)"
+            errorMessage = "Не удалось создать счета: \(error.localizedDescription)"
             isSaving = false
             return false
         }
+    }
+
+    /// Подпись следующего расчётного месяца («октябрь 2026») для подтверждения.
+    var nextMonthLabel: String? {
+        let label = filtersNextMonthDTO?.label ?? overview?.next_billing_period_label
+        let period = filtersNextMonthDTO?.billing_period ?? overview?.next_billing_period
+
+        if let label, !label.isEmpty {
+            return label
+        }
+
+        return period.map { AppDateFormatter.monthYear($0) }
     }
 
     // MARK: - Admin finance: billing
@@ -673,7 +652,7 @@ final class FinanceViewModel: ObservableObject {
                 method: "GET"
             )
 
-            billingSettings = try JSONDecoder().decode(BillingSettingsDTO.self, from: data)
+            billingSettings = try decodeResponse(BillingSettingsDTO.self, from: data)
         } catch {
             errorMessage = "Не удалось загрузить настройки начислений: \(error.localizedDescription)"
         }
@@ -683,52 +662,64 @@ final class FinanceViewModel: ObservableObject {
         api: SchoolAPI,
         formData: BillingSettingsFormData
     ) async -> Bool {
-        isSaving = true
+        guard !isSaving else {
+            return false
+        }
+
         errorMessage = nil
         successMessage = nil
 
-        let monthlyAmount = formData.monthlyAmount.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dueDayText = formData.dueDay.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !monthlyAmount.isEmpty else {
-            errorMessage = "Введите месячную стоимость"
-            isSaving = false
-            return false
-        }
-
-        guard let dueDay = Int(dueDayText), (1...31).contains(dueDay) else {
-            errorMessage = "День оплаты должен быть числом от 1 до 31"
-            isSaving = false
-            return false
-        }
-
-        var body: [String: Any] = [
-            "monthly_amount": monthlyAmount,
-            "invoice_title_template": formData.invoiceTitleTemplate,
-            "invoice_description_template": formData.invoiceDescriptionTemplate,
-            "due_day": dueDay,
-            "vacation_discount_enabled": formData.vacationDiscountEnabled
+        let amounts: [(field: String, title: String, value: String)] = [
+            ("tuition_base_amount", "стоимость обучения", formData.tuitionBaseAmount),
+            ("meal_daily_amount", "питание за день", formData.mealDailyAmount),
+            ("vacation_daily_amount", "плата за день отпуска", formData.vacationDailyAmount)
         ]
 
-        if let vacationDailyRate = cleanOptional(formData.vacationDailyRate) {
-            body["vacation_daily_rate"] = vacationDailyRate
+        var body: [String: Any] = [:]
+
+        for amount in amounts {
+            guard let value = FinanceMoney.decimal(from: amount.value), value >= 0 else {
+                errorMessage = "Укажите \(amount.title) числом не меньше нуля"
+                return false
+            }
+
+            body[amount.field] = FinanceMoney.plainString(value)
         }
 
-        if let value = Int(formData.minWorkingDaysForFullCharge.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            body["min_working_days_for_full_charge"] = value
+        guard let daysPerYear = Int(formData.vacationDaysPerYear.trimmingCharacters(in: .whitespacesAndNewlines)),
+              daysPerYear >= 0 else {
+            errorMessage = "Укажите количество дней отпуска в год целым числом"
+            return false
         }
+
+        guard let yearStart = AdminDateInput.iso(fromDisplay: formData.vacationYearStart) else {
+            errorMessage = "Укажите начало отпускного года в формате ДД.ММ.ГГГГ"
+            return false
+        }
+
+        body["vacation_days_per_year"] = daysPerYear
+        body["vacation_year_start"] = yearStart
+        body["missed_meal_statuses"] = MissedMealStatusOption.all
+            .map(\.code)
+            .filter { formData.missedMealStatuses.contains($0) }
+
+        isSaving = true
 
         do {
-            _ = try await sendRequest(
+            let data = try await sendRequest(
                 api: api,
                 path: "/api/v1/finance/billing-settings",
                 method: "PUT",
                 body: body
             )
 
-            successMessage = "Настройки начислений сохранены"
-            await loadBillingSettings(api: api)
+            if let saved = try? JSONDecoder().decode(BillingSettingsDTO.self, from: data) {
+                billingSettings = saved
+            } else {
+                await loadBillingSettings(api: api)
+            }
 
+            successMessage = "Настройки начислений сохранены"
             isSaving = false
             return true
         } catch {
@@ -746,10 +737,12 @@ final class FinanceViewModel: ObservableObject {
     ) async {
         let period = billingPeriod.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !period.isEmpty else {
-            errorMessage = "Укажите расчётный период"
+        guard Self.isBillingPeriod(period) else {
+            errorMessage = "Укажите расчётный месяц в формате ГГГГ-ММ"
             return
         }
+
+        errorMessage = nil
 
         do {
             let data = try await sendRequest(
@@ -761,41 +754,47 @@ final class FinanceViewModel: ObservableObject {
                 ]
             )
 
-            let decoded = try JSONDecoder().decode(WorkingDaysResponseDTO.self, from: data)
-            workingDays = decoded.working_days
+            let decoded = try decodeResponse(WorkingDaysResponseDTO.self, from: data)
+            workingDays = decoded.items.sorted { $0.day_date < $1.day_date }
             workingDaysPeriod = decoded.billing_period ?? period
         } catch {
             errorMessage = "Не удалось загрузить рабочие дни: \(error.localizedDescription)"
         }
     }
 
-    func saveWorkingDays(
-        api: SchoolAPI,
-        billingPeriod: String,
-        days: [WorkingDayDTO]
-    ) async -> Bool {
-        isSaving = true
+    /// Переключает день между рабочим и выходным до сохранения.
+    func toggleWorkingDay(_ date: String) {
+        guard let index = workingDays.firstIndex(where: { $0.day_date == date }) else {
+            return
+        }
+
+        workingDays[index].is_working_day.toggle()
+    }
+
+    /// Сервер ждёт список рабочих дат месяца; остальные дни станут выходными.
+    func saveWorkingDays(api: SchoolAPI) async -> Bool {
+        guard !isSaving else {
+            return false
+        }
+
         errorMessage = nil
         successMessage = nil
 
-        let period = billingPeriod.trimmingCharacters(in: .whitespacesAndNewlines)
+        let period = workingDaysPeriod
 
-        guard !period.isEmpty else {
-            errorMessage = "Укажите расчётный период"
-            isSaving = false
+        guard Self.isBillingPeriod(period), !workingDays.isEmpty else {
+            errorMessage = "Сначала загрузите рабочие дни за месяц"
             return false
         }
 
         let body: [String: Any] = [
             "billing_period": period,
-            "working_days": days.map { day in
-                [
-                    "date": day.date,
-                    "is_working": day.is_working,
-                    "comment": day.comment ?? ""
-                ] as [String: Any]
-            }
+            "working_days": workingDays
+                .filter(\.is_working_day)
+                .map(\.day_date)
         ]
+
+        isSaving = true
 
         do {
             _ = try await sendRequest(
@@ -805,8 +804,8 @@ final class FinanceViewModel: ObservableObject {
                 body: body
             )
 
-            successMessage = "Рабочие дни сохранены"
             await loadWorkingDays(api: api, billingPeriod: period)
+            successMessage = "Рабочие дни сохранены"
 
             isSaving = false
             return true
@@ -819,25 +818,32 @@ final class FinanceViewModel: ObservableObject {
 
     // MARK: - Admin finance: vacation
 
+    /// `vacationYearStart` — `дд.мм.гггг`; пусто — сервер берёт начало года из настроек.
     func loadStudentVacation(
         api: SchoolAPI,
         studentID: Int,
-        billingPeriod: String
+        vacationYearStart: String
     ) async {
         guard studentID != 0 else {
             errorMessage = "Выберите ученика"
             return
         }
 
-        let period = billingPeriod.trimmingCharacters(in: .whitespacesAndNewlines)
+        var queryItems: [URLQueryItem] = []
+        let cleanYearStart = vacationYearStart.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        do {
-            var queryItems: [URLQueryItem] = []
-
-            if !period.isEmpty {
-                queryItems.append(URLQueryItem(name: "billing_period", value: period))
+        if !cleanYearStart.isEmpty {
+            guard let iso = AdminDateInput.iso(fromDisplay: cleanYearStart) else {
+                errorMessage = "Укажите начало отпускного года в формате ДД.ММ.ГГГГ"
+                return
             }
 
+            queryItems.append(URLQueryItem(name: "vacation_year_start", value: iso))
+        }
+
+        errorMessage = nil
+
+        do {
             let data = try await sendRequest(
                 api: api,
                 path: "/api/v1/finance/students/\(studentID)/vacation",
@@ -845,35 +851,49 @@ final class FinanceViewModel: ObservableObject {
                 queryItems: queryItems
             )
 
-            studentVacation = try JSONDecoder().decode(StudentVacationDTO.self, from: data)
+            studentVacation = try decodeResponse(StudentVacationDTO.self, from: data)
         } catch {
             errorMessage = "Не удалось загрузить отпуск ученика: \(error.localizedDescription)"
         }
     }
 
+    /// Дни отпуска, использованные до начала учёта в приложении.
     func saveStudentVacationBalance(
         api: SchoolAPI,
         studentID: Int,
-        billingPeriod: String,
-        balanceDays: Int
+        vacationYearStart: String,
+        usedDaysInitialText: String
     ) async -> Bool {
-        isSaving = true
+        guard !isSaving else {
+            return false
+        }
+
         errorMessage = nil
         successMessage = nil
 
         guard studentID != 0 else {
             errorMessage = "Выберите ученика"
-            isSaving = false
             return false
         }
 
-        var body: [String: Any] = [
-            "balance_days": balanceDays
+        guard let yearStart = AdminDateInput.iso(fromDisplay: vacationYearStart)
+                ?? studentVacation?.vacation_year_start.flatMap({ AdminDateInput.iso(fromDisplay: $0) }) else {
+            errorMessage = "Укажите начало отпускного года в формате ДД.ММ.ГГГГ"
+            return false
+        }
+
+        guard let usedDays = Int(usedDaysInitialText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              usedDays >= 0 else {
+            errorMessage = "Введите количество дней целым числом"
+            return false
+        }
+
+        let body: [String: Any] = [
+            "vacation_year_start": yearStart,
+            "used_days_initial": usedDays
         ]
 
-        if let period = cleanOptional(billingPeriod) {
-            body["billing_period"] = period
-        }
+        isSaving = true
 
         do {
             _ = try await sendRequest(
@@ -883,8 +903,12 @@ final class FinanceViewModel: ObservableObject {
                 body: body
             )
 
-            successMessage = "Баланс отпускных дней сохранён"
-            await loadStudentVacation(api: api, studentID: studentID, billingPeriod: billingPeriod)
+            await loadStudentVacation(
+                api: api,
+                studentID: studentID,
+                vacationYearStart: AdminDateInput.display(fromISO: yearStart)
+            )
+            successMessage = "Использованные дни отпуска сохранены"
 
             isSaving = false
             return true
@@ -895,34 +919,40 @@ final class FinanceViewModel: ObservableObject {
         }
     }
 
+    /// Заменяет дни отпуска ученика в месяце `billingPeriod` (ГГГГ-ММ) на `days` (ISO-даты).
     func saveStudentVacationDays(
         api: SchoolAPI,
         studentID: Int,
         billingPeriod: String,
-        days: [StudentVacationDayDTO]
+        days: Set<String>
     ) async -> Bool {
-        isSaving = true
-        errorMessage = nil
-        successMessage = nil
-
-        guard studentID != 0 else {
-            errorMessage = "Выберите ученика"
-            isSaving = false
+        guard !isSaving else {
             return false
         }
 
-        var body: [String: Any] = [
-            "vacation_days": days.map { day in
-                [
-                    "date": day.date,
-                    "comment": day.comment ?? ""
-                ] as [String: Any]
-            }
+        errorMessage = nil
+        successMessage = nil
+
+        let period = billingPeriod.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard studentID != 0, let bounds = Self.monthBounds(period) else {
+            errorMessage = "Выберите ученика и месяц в формате ГГГГ-ММ"
+            return false
+        }
+
+        let body: [String: Any] = [
+            "date_from": bounds.first,
+            "date_to": bounds.last,
+            "vacation_days": days
+                .filter { $0 >= bounds.first && $0 <= bounds.last }
+                .sorted()
         ]
 
-        if let period = cleanOptional(billingPeriod) {
-            body["billing_period"] = period
-        }
+        let yearStart = studentVacation?.student_id == studentID
+            ? AdminDateInput.display(fromISO: studentVacation?.vacation_year_start)
+            : ""
+
+        isSaving = true
 
         do {
             _ = try await sendRequest(
@@ -932,13 +962,13 @@ final class FinanceViewModel: ObservableObject {
                 body: body
             )
 
-            successMessage = "Отпускные дни сохранены"
-            await loadStudentVacation(api: api, studentID: studentID, billingPeriod: billingPeriod)
+            await loadStudentVacation(api: api, studentID: studentID, vacationYearStart: yearStart)
+            successMessage = "Дни отпуска сохранены"
 
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось сохранить отпускные дни: \(error.localizedDescription)"
+            errorMessage = "Не удалось сохранить дни отпуска: \(error.localizedDescription)"
             isSaving = false
             return false
         }
@@ -946,32 +976,24 @@ final class FinanceViewModel: ObservableObject {
 
     // MARK: - Admin finance: monthly preview and generation
 
+    /// `correctionPeriod` — месяц перерасчёта питания; пусто — сервер берёт предыдущий месяц.
     func previewMonthlyInvoices(
         api: SchoolAPI,
         billingPeriod: String,
-        periodStartsAt: String,
-        periodEndsAt: String,
-        dueDate: String
+        correctionPeriod: String
     ) async -> Bool {
-        isSaving = true
-        errorMessage = nil
-        successMessage = nil
-
-        guard !billingPeriod.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !periodStartsAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !periodEndsAt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !dueDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "Заполните период, даты начала/конца и срок оплаты"
-            isSaving = false
+        guard !isSaving else {
             return false
         }
 
-        let body: [String: Any] = [
-            "billing_period": billingPeriod,
-            "period_starts_at": periodStartsAt,
-            "period_ends_at": periodEndsAt,
-            "due_date": dueDate
-        ]
+        errorMessage = nil
+        successMessage = nil
+
+        guard let body = monthlyRequestBody(billingPeriod: billingPeriod, correctionPeriod: correctionPeriod) else {
+            return false
+        }
+
+        isSaving = true
 
         do {
             let data = try await sendRequest(
@@ -981,7 +1003,7 @@ final class FinanceViewModel: ObservableObject {
                 body: body
             )
 
-            monthlyPreview = try JSONDecoder().decode(MonthlyInvoicesPreviewResponseDTO.self, from: data)
+            monthlyPreview = try decodeResponse(MonthlyInvoicesPreviewResponseDTO.self, from: data)
             successMessage = "Предпросмотр сформирован"
 
             isSaving = false
@@ -993,39 +1015,51 @@ final class FinanceViewModel: ObservableObject {
         }
     }
 
+    /// Без `overwriteExisting` сервер пропускает учеников, у которых счёт за месяц уже есть.
     func generateMonthlyDetailedInvoices(
         api: SchoolAPI,
         billingPeriod: String,
-        periodStartsAt: String,
-        periodEndsAt: String,
-        dueDate: String
+        correctionPeriod: String,
+        dueDate: String,
+        overwriteExisting: Bool
     ) async -> Bool {
-        isSaving = true
+        guard !isSaving else {
+            return false
+        }
+
         errorMessage = nil
         successMessage = nil
 
-        let body: [String: Any] = [
-            "billing_period": billingPeriod,
-            "period_starts_at": periodStartsAt,
-            "period_ends_at": periodEndsAt,
-            "due_date": dueDate
-        ]
+        guard var body = monthlyRequestBody(billingPeriod: billingPeriod, correctionPeriod: correctionPeriod) else {
+            return false
+        }
+
+        let cleanDueDate = dueDate.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !cleanDueDate.isEmpty {
+            guard let iso = AdminDateInput.iso(fromDisplay: cleanDueDate) else {
+                errorMessage = "Срок оплаты укажите в формате ДД.ММ.ГГГГ"
+                return false
+            }
+
+            body["due_date"] = iso
+        }
+
+        body["overwrite_existing"] = overwriteExisting
+
+        isSaving = true
 
         do {
             let data = try await sendRequest(
                 api: api,
                 path: "/api/v1/finance/generate-monthly-detailed",
                 method: "POST",
-                body: body
+                body: body,
+                timeout: 120
             )
 
             let decoded = try? JSONDecoder().decode(MonthlyDetailedGenerationResponseDTO.self, from: data)
-
-            if let created = decoded?.created_count {
-                successMessage = "Детальные счета созданы: \(created)"
-            } else {
-                successMessage = "Детальные счета созданы"
-            }
+            successMessage = "Создано счетов: \(decoded?.created_count ?? 0), пропущено: \(decoded?.skipped_count ?? 0)"
 
             await loadFilters(api: api)
             await loadInvoices(api: api, showLoading: false)
@@ -1034,10 +1068,54 @@ final class FinanceViewModel: ObservableObject {
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось создать детальные счета: \(error.localizedDescription)"
+            errorMessage = "Не удалось создать счета: \(error.localizedDescription)"
             isSaving = false
             return false
         }
+    }
+
+    private func monthlyRequestBody(billingPeriod: String, correctionPeriod: String) -> [String: Any]? {
+        let period = billingPeriod.trimmingCharacters(in: .whitespacesAndNewlines)
+        let correction = correctionPeriod.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard Self.isBillingPeriod(period), correction.isEmpty || Self.isBillingPeriod(correction) else {
+            errorMessage = "Укажите месяцы в формате ГГГГ-ММ"
+            return nil
+        }
+
+        var body: [String: Any] = [
+            "billing_period": period
+        ]
+
+        if !correction.isEmpty {
+            body["correction_period"] = correction
+        }
+
+        return body
+    }
+
+    static func isBillingPeriod(_ value: String) -> Bool {
+        monthBounds(value) != nil
+    }
+
+    /// `ГГГГ-ММ` → первый и последний день месяца в ISO.
+    static func monthBounds(_ value: String) -> (first: String, last: String)? {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard clean.range(of: #"^\d{4}-\d{2}$"#, options: .regularExpression) != nil,
+              let first = AdminDateInput.date(fromISO: clean + "-01"),
+              AdminDateInput.iso(from: first) == clean + "-01" else {
+            return nil
+        }
+
+        let calendar = Calendar(identifier: .gregorian)
+
+        guard let range = calendar.range(of: .day, in: .month, for: first),
+              let last = calendar.date(byAdding: .day, value: range.count - 1, to: first) else {
+            return nil
+        }
+
+        return (AdminDateInput.iso(from: first), AdminDateInput.iso(from: last))
     }
 
     // MARK: - Admin finance: legal entities
@@ -1197,27 +1275,24 @@ final class FinanceViewModel: ObservableObject {
         let payerName = formData.payerName.trimmingCharacters(in: .whitespacesAndNewlines)
         let inn = formData.inn.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !payerName.isEmpty else {
-            errorMessage = "Введите имя плательщика"
+        guard inn.range(of: #"^\d{10}(\d{2})?$"#, options: .regularExpression) != nil else {
+            errorMessage = "ИНН должен содержать 10 или 12 цифр"
             isSaving = false
             return false
         }
 
-        guard !inn.isEmpty else {
-            errorMessage = "Введите ИНН"
-            isSaving = false
-            return false
-        }
-
+        // Имя плательщика необязательно. При изменении сервер не меняет ученика у связи.
         var body: [String: Any] = [
-            "student_id": formData.studentID,
-            "payer_name": payerName,
             "inn": inn,
             "is_active": formData.isActive
         ]
 
-        if let comment = cleanOptional(formData.comment) {
-            body["comment"] = comment
+        if id == nil {
+            body["student_id"] = formData.studentID
+        }
+
+        if !payerName.isEmpty {
+            body["payer_name"] = payerName
         }
 
         do {
@@ -1360,15 +1435,25 @@ final class FinanceViewModel: ObservableObject {
         return clean.isEmpty ? nil : clean
     }
 
+    private func decodeResponse<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw APIRequestError.decodingError("сервер вернул данные в неожиданном формате")
+        }
+    }
+
     private func sendRequest(
         api: SchoolAPI,
         path: String,
         method: String,
         queryItems: [URLQueryItem] = [],
-        body: [String: Any]? = nil
+        body: [String: Any]? = nil,
+        timeout: TimeInterval? = nil
     ) async throws -> Data {
         guard let token = api.authToken else {
-            throw FinanceError.noToken
+            AuthSessionEvents.notifySessionExpired()
+            throw APIRequestError.noToken
         }
 
         var components = URLComponents()
@@ -1378,7 +1463,7 @@ final class FinanceViewModel: ObservableObject {
         components.queryItems = queryItems.isEmpty ? nil : queryItems
 
         guard let url = components.url else {
-            throw FinanceError.badURL
+            throw APIRequestError.badURL
         }
 
         var request = URLRequest(url: url)
@@ -1387,73 +1472,46 @@ final class FinanceViewModel: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.applyMobileClientHeaders()
 
+        if let timeout {
+            request.timeoutInterval = timeout
+        }
+
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-            #if DEBUG
-            print("FINANCE REQUEST:", method, url.absoluteString)
-            print("FINANCE BODY:", body)
-            #endif
-        } else {
-            #if DEBUG
-            print("FINANCE REQUEST:", method, url.absoluteString)
-            #endif
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        #if DEBUG
+        print("FINANCE REQUEST:", method, url.absoluteString)
+        #endif
+
+        let data: Data
+        let response: URLResponse
+
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw APIRequestError.networkError(error.localizedDescription)
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw FinanceError.badResponse
+            throw APIRequestError.badResponse
         }
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
         #if DEBUG
         print("FINANCE RESPONSE STATUS:", httpResponse.statusCode)
-        print("FINANCE RESPONSE BODY:", responseText)
         #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()
-            throw FinanceError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw FinanceError.serverError(statusCode: httpResponse.statusCode, text: responseText)
+            throw APIRequestError.serverError(statusCode: httpResponse.statusCode, text: responseText)
         }
 
         return data
-    }
-}
-
-private struct FinanceNextMonthPayload {
-    let billingPeriod: String?
-    let periodStartsAt: String?
-    let periodEndsAt: String?
-    let dueDate: String?
-}
-
-enum FinanceError: LocalizedError {
-    case noToken
-    case badURL
-    case badResponse
-    case serverError(statusCode: Int, text: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .noToken:
-            return "Нет токена авторизации. Войдите снова."
-        case .badURL:
-            return "Некорректный URL."
-        case .badResponse:
-            return "Некорректный ответ сервера."
-        case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
-            }
-        }
     }
 }

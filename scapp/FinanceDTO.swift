@@ -225,140 +225,151 @@ struct PaymentIDStatusResponseDTO: Codable {
 
 // MARK: - Existing next month generation
 
+/// Ответ `POST /finance/generate-next-month`. Счета, уже выставленные за месяц, сервер пропускает.
 struct FinanceNextMonthResponseDTO: Codable {
     let status: String?
+    let billing_period: String?
+    let billing_period_label: String?
     let created_count: Int?
-    let message: String?
+    let skipped_count: Int?
+}
+
+// MARK: - Money
+
+enum FinanceMoney {
+    /// «23 500,50» → Decimal; nil, если это не число. Без Double — без ошибок округления.
+    static func decimal(from value: String?) -> Decimal? {
+        guard let value else {
+            return nil
+        }
+
+        let clean = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\u{00A0}", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+
+        guard !clean.isEmpty,
+              clean.range(of: #"^-?\d+(\.\d+)?$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+
+        return Decimal(string: clean, locale: Locale(identifier: "en_US_POSIX"))
+    }
+
+    /// Строка для отправки на сервер: «23500.5».
+    static func plainString(_ value: Decimal) -> String {
+        NSDecimalNumber(decimal: value).stringValue
+    }
 }
 
 // MARK: - Billing settings
 
+/// `GET/PUT /finance/billing-settings` (schemas/finance_billing.py). Суммы — Decimal-строки.
 struct BillingSettingsDTO: Codable, Hashable {
-    let monthly_amount: String?
-    let invoice_title_template: String?
-    let invoice_description_template: String?
-    let due_day: Int?
-    let vacation_discount_enabled: Bool?
-    let vacation_daily_rate: String?
-    let min_working_days_for_full_charge: Int?
-    let updated_at: String?
+    let tuition_base_amount: String?
+    let meal_daily_amount: String?
+    let vacation_daily_amount: String?
+    let vacation_days_per_year: Int?
+    let vacation_year_start: String?
+    let missed_meal_statuses: [String]?
+}
+
+/// Статусы посещаемости, за которые питание пересчитывается (attendance.status).
+enum MissedMealStatusOption {
+    static let all: [(code: String, title: String)] = [
+        ("absent", "Отсутствовал"),
+        ("sick", "Болел"),
+        ("excused", "Отсутствовал по уважительной причине"),
+        ("late", "Опоздал")
+    ]
 }
 
 struct BillingSettingsFormData: Hashable {
-    var monthlyAmount: String
-    var invoiceTitleTemplate: String
-    var invoiceDescriptionTemplate: String
-    var dueDay: String
-    var vacationDiscountEnabled: Bool
-    var vacationDailyRate: String
-    var minWorkingDaysForFullCharge: String
+    var tuitionBaseAmount: String
+    var mealDailyAmount: String
+    var vacationDailyAmount: String
+    var vacationDaysPerYear: String
+    /// `дд.мм.гггг`
+    var vacationYearStart: String
+    var missedMealStatuses: Set<String>
 
     init(settings: BillingSettingsDTO? = nil) {
-        monthlyAmount = settings?.monthly_amount ?? ""
-        invoiceTitleTemplate = settings?.invoice_title_template ?? "Оплата за обучение"
-        invoiceDescriptionTemplate = settings?.invoice_description_template ?? ""
-        dueDay = settings?.due_day.map(String.init) ?? "10"
-        vacationDiscountEnabled = settings?.vacation_discount_enabled ?? true
-        vacationDailyRate = settings?.vacation_daily_rate ?? ""
-        minWorkingDaysForFullCharge = settings?.min_working_days_for_full_charge.map(String.init) ?? ""
+        tuitionBaseAmount = settings?.tuition_base_amount ?? ""
+        mealDailyAmount = settings?.meal_daily_amount ?? ""
+        vacationDailyAmount = settings?.vacation_daily_amount ?? ""
+        vacationDaysPerYear = settings?.vacation_days_per_year.map(String.init) ?? ""
+        vacationYearStart = AdminDateInput.display(fromISO: settings?.vacation_year_start)
+        missedMealStatuses = Set(settings?.missed_meal_statuses ?? [])
     }
 }
 
 // MARK: - Working days
 
+/// `GET /finance/working-days?billing_period=ГГГГ-ММ`: все дни месяца с признаком рабочего дня.
 struct WorkingDaysResponseDTO: Codable, Hashable {
     let billing_period: String?
-    let working_days: [WorkingDayDTO]
-    let total_working_days: Int?
+    let items: [WorkingDayDTO]
 }
 
 struct WorkingDayDTO: Codable, Identifiable, Hashable {
-    let date: String
-    let is_working: Bool
-    let comment: String?
+    let day_date: String
+    var is_working_day: Bool
 
     var id: String {
-        date
+        day_date
     }
-}
-
-struct WorkingDaysSaveRequestDTO: Codable {
-    let billing_period: String
-    let working_days: [WorkingDaySaveDTO]
-}
-
-struct WorkingDaySaveDTO: Codable, Hashable {
-    let date: String
-    let is_working: Bool
-    let comment: String?
 }
 
 // MARK: - Student vacation
 
+/// `GET /finance/students/{id}/vacation?vacation_year_start=ГГГГ-ММ-ДД`.
 struct StudentVacationDTO: Codable, Hashable {
     let student_id: Int
     let student_name: String?
-    let billing_period: String?
-    let balance_days: Int?
-    let used_days: Int?
-    let available_days: Int?
-    let vacation_days: [StudentVacationDayDTO]
-}
-
-struct StudentVacationDayDTO: Codable, Identifiable, Hashable {
-    let date: String
-    let comment: String?
-
-    var id: String {
-        date
-    }
-}
-
-struct VacationBalanceSaveRequestDTO: Codable {
-    let billing_period: String?
-    let balance_days: Int
-}
-
-struct VacationDaysSaveRequestDTO: Codable {
-    let billing_period: String?
-    let vacation_days: [StudentVacationDaySaveDTO]
-}
-
-struct StudentVacationDaySaveDTO: Codable, Hashable {
-    let date: String
-    let comment: String?
+    let vacation_year_start: String?
+    let vacation_days_per_year: Int?
+    let used_days_initial: Int?
+    let used_days_total: Int?
+    let used_days_in_calendar: Int?
+    let remaining_days: Int?
+    /// Дни отпуска с начала отпускного года, ISO-даты.
+    let days: [String]
 }
 
 // MARK: - Monthly invoices preview / generation
 
-struct MonthlyInvoicesPreviewRequestDTO: Codable {
-    let billing_period: String
-    let period_starts_at: String
-    let period_ends_at: String
-    let due_date: String
-}
-
 struct MonthlyInvoicesPreviewResponseDTO: Codable, Hashable {
     let billing_period: String?
-    let period_starts_at: String?
-    let period_ends_at: String?
-    let due_date: String?
-    let total_count: Int?
-    let total_amount: String?
+    let correction_period: String?
     let items: [MonthlyInvoicePreviewItemDTO]
+
+    /// Итог по всем ученикам в Decimal — без ошибок округления.
+    var totalAmount: Decimal {
+        items.reduce(Decimal(0)) { partial, item in
+            partial + (FinanceMoney.decimal(from: item.total_amount) ?? 0)
+        }
+    }
 }
 
 struct MonthlyInvoicePreviewItemDTO: Codable, Identifiable, Hashable {
     let student_id: Int
     let student_name: String
     let class_name: String?
-    let amount: String
-    let base_amount: String?
-    let discount_amount: String?
-    let working_days: Int?
+    let billing_period: String?
+    let correction_period: String?
+    let tuition_amount: String?
+    let meal_days: Int?
+    let meal_daily_amount: String?
+    let meal_amount: String?
+    let missed_meal_days: Int?
+    let meal_correction_amount: String?
     let vacation_days: Int?
-    let payable_days: Int?
-    let comment: String?
+    let vacation_chargeable_days: Int?
+    let vacation_over_limit_days: Int?
+    let vacation_daily_amount: String?
+    let vacation_amount: String?
+    let total_amount: String
 
     var id: Int {
         student_id
@@ -367,10 +378,11 @@ struct MonthlyInvoicePreviewItemDTO: Codable, Identifiable, Hashable {
 
 struct MonthlyDetailedGenerationResponseDTO: Codable, Hashable {
     let status: String?
+    let billing_period: String?
+    let correction_period: String?
     let created_count: Int?
     let skipped_count: Int?
-    let total_amount: String?
-    let message: String?
+    let invoice_ids: [Int]?
 }
 
 // MARK: - Invoice items / parent-visible explanation
@@ -394,6 +406,12 @@ struct InvoiceItemDTO: Codable, Identifiable, Hashable {
 
     var readableType: String {
         switch item_type {
+        case "tuition":
+            return "Обучение"
+        case "meal":
+            return "Питание"
+        case "meal_correction":
+            return "Перерасчёт питания"
         case "base":
             return "Основное начисление"
         case "discount":
@@ -467,28 +485,27 @@ struct StudentPayerInnDTO: Codable, Identifiable, Hashable {
     let id: Int
     let student_id: Int
     let student_name: String?
-    let payer_name: String
+    let class_name: String?
+    /// Сервер разрешает связь ИНН без имени плательщика.
+    let payer_name: String?
     let inn: String
-    let comment: String?
+    let legal_entity_name: String?
     let is_active: Bool?
     let created_at: String?
-    let updated_at: String?
 }
 
 struct StudentPayerInnFormData: Hashable {
     var studentID: Int = 0
     var payerName: String = ""
     var inn: String = ""
-    var comment: String = ""
     var isActive: Bool = true
 
     init() {}
 
     init(item: StudentPayerInnDTO) {
         studentID = item.student_id
-        payerName = item.payer_name
+        payerName = item.payer_name ?? ""
         inn = item.inn
-        comment = item.comment ?? ""
         isActive = item.is_active ?? true
     }
 }

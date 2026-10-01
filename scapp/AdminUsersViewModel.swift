@@ -125,11 +125,14 @@ final class AdminUsersViewModel: ObservableObject {
                 "is_active": isActive
             ]
 
-            let editableRoleCodes = ["admin", "cook", "manager"]
+            let profileRoleCodes: Set<String> = ["teacher", "parent", "student"]
 
-            // Роль отправляем только для системных ролей общего раздела.
-            // Учителя, родители и ученики управляются через отдельные разделы админки.
-            if editableRoleCodes.contains(originalRoleCode) {
+            // role_code отправляем только при реальной смене роли и только для ролей
+            // общего раздела: роли учителя, родителя и ученика сервер отклоняет (400),
+            // а повторная отправка роли admin менеджером тоже вызывает отказ.
+            if roleCode != originalRoleCode,
+               !profileRoleCodes.contains(roleCode),
+               !profileRoleCodes.contains(originalRoleCode) {
                 body["role_code"] = roleCode
             }
 
@@ -146,41 +149,9 @@ final class AdminUsersViewModel: ObservableObject {
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось обновить пользователя: \(readableAdminUsersError(error))"
+            errorMessage = "Не удалось обновить пользователя: \(error.localizedDescription)"
             isSaving = false
             return false
-        }
-    }
-
-    private func readableAdminUsersError(_ error: Error) -> String {
-        guard let adminError = error as? AdminUsersError else {
-            return error.localizedDescription
-        }
-
-        switch adminError {
-        case .serverError(_, let text):
-            guard let data = text.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let detail = json["detail"] as? String else {
-                return adminError.localizedDescription
-            }
-
-            let normalizedDetail = detail
-                .lowercased()
-                .replacingOccurrences(of: "/", with: " ")
-                .replacingOccurrences(of: "-", with: " ")
-
-            if normalizedDetail.contains("dedicated section")
-                && normalizedDetail.contains("teacher")
-                && normalizedDetail.contains("parent")
-                && normalizedDetail.contains("student") {
-                return "Учителей, родителей и учеников нужно создавать и редактировать в отдельных разделах админки. В общем списке пользователей можно менять только ФИО, активность и пароль."
-            }
-
-            return detail
-
-        default:
-            return adminError.localizedDescription
         }
     }
 
@@ -303,11 +274,7 @@ enum AdminUsersError: LocalizedError {
         case .badResponse:
             return "Некорректный ответ сервера."
         case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
-            }
+            return APIRequestError.readableServerError(statusCode: statusCode, text: text)
         }
     }
 }

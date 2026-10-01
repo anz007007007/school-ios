@@ -2,10 +2,11 @@ import SwiftUI
 
 struct AdminTermFormData {
     var name: String = ""
-    var academicYear: String = "2025-2026"
+    var academicYear: String = AdminDateInput.currentAcademicYear
     var termType: String = "quarter"
-    var startsAt: String = "2025-09-01"
-    var endsAt: String = "2025-10-31"
+    /// Даты в форме — `дд.мм.гггг`; в ISO переводятся при сохранении.
+    var startsAt: String = ""
+    var endsAt: String = ""
     var isActive: Bool = true
 }
 
@@ -20,7 +21,7 @@ struct AdminTermFormFieldsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
 
-            Picker("Тип", selection: $formData.termType) {
+            Picker("Тип периода", selection: $formData.termType) {
                 Text("Четверть").tag("quarter")
                 Text("Триместр").tag("trimester")
                 Text("Семестр").tag("semester")
@@ -31,17 +32,19 @@ struct AdminTermFormFieldsView: View {
         }
 
         Section("Даты") {
-            TextField("Дата начала, например 2025-09-01", text: $formData.startsAt)
+            TextField("Дата начала, например 01.09.2026", text: $formData.startsAt)
+                .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
 
-            TextField("Дата окончания, например 2025-10-31", text: $formData.endsAt)
+            TextField("Дата окончания, например 31.10.2026", text: $formData.endsAt)
+                .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
 
         Section {
-            Text("Формат дат должен быть YYYY-MM-DD.")
+            Text("Даты вводятся в формате ДД.ММ.ГГГГ.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

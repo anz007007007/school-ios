@@ -368,7 +368,7 @@ struct AdminGradeTypeFormScreen: View {
                     }
                 }
             } message: {
-                Text("Тип оценки \(item?.name ?? "") будет отключён.")
+                Text("Запись «\(item?.name ?? "")» будет отключена.")
             }
         }
     }

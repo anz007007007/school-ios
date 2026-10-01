@@ -7,21 +7,17 @@ struct FinanceAdminView: View {
     @State private var billingForm = BillingSettingsFormData()
 
     @State private var billingPeriod = ""
-    @State private var periodStartsAt = ""
-    @State private var periodEndsAt = ""
+    @State private var correctionPeriod = ""
     @State private var dueDate = ""
+    @State private var overwriteExisting = false
 
-    @State private var workingDaysDraft: [WorkingDayDTO] = []
-    @State private var newWorkingDayDate = ""
-    @State private var newWorkingDayComment = ""
-    @State private var newWorkingDayIsWorking = true
+    @State private var workingDaysPeriod = ""
 
     @State private var vacationStudentID = 0
+    @State private var vacationYearStart = ""
+    @State private var vacationUsedDaysText = ""
     @State private var vacationPeriod = ""
-    @State private var vacationBalanceText = ""
-    @State private var vacationDaysDraft: [StudentVacationDayDTO] = []
-    @State private var newVacationDate = ""
-    @State private var newVacationComment = ""
+    @State private var vacationSelectedDays: Set<String> = []
 
     @State private var editingLegalEntity: FinanceLegalEntityDTO?
     @State private var isShowingLegalEntityForm = false
@@ -115,25 +111,27 @@ struct FinanceAdminView: View {
                 )
             }
             .confirmationDialog(
-                "Создать детальные счета?",
+                "Создать счета за месяц?",
                 isPresented: $isShowingGenerateConfirmation,
                 titleVisibility: .visible
             ) {
-                Button("Создать счета") {
+                Button(overwriteExisting ? "Пересоздать счета" : "Создать счета", role: overwriteExisting ? .destructive : nil) {
                     Task {
                         _ = await viewModel.generateMonthlyDetailedInvoices(
                             api: appState.api,
                             billingPeriod: billingPeriod,
-                            periodStartsAt: periodStartsAt,
-                            periodEndsAt: periodEndsAt,
-                            dueDate: dueDate
+                            correctionPeriod: correctionPeriod,
+                            dueDate: dueDate,
+                            overwriteExisting: overwriteExisting
                         )
                     }
                 }
 
                 Button("Отмена", role: .cancel) {}
             } message: {
-                Text("Будут созданы счета с детализацией начислений, рабочих дней и отпусков.")
+                Text(overwriteExisting
+                     ? "Уже выставленные за \(AppDateFormatter.monthYear(billingPeriod)) счета будут отменены и созданы заново."
+                     : "Будут созданы счета за \(AppDateFormatter.monthYear(billingPeriod)) с детализацией: обучение, питание, перерасчёт и отпуск. Ученики, у которых счёт уже есть, будут пропущены.")
             }
             .confirmationDialog(
                 "Удалить юрлицо?",
@@ -222,26 +220,33 @@ struct FinanceAdminView: View {
 
     private var billingSettingsSection: some View {
         Section {
-            TextField("Месячная стоимость", text: $billingForm.monthlyAmount)
+            TextField("Стоимость обучения в месяц, ₽", text: $billingForm.tuitionBaseAmount)
                 .keyboardType(.decimalPad)
 
-            TextField("Шаблон названия счёта", text: $billingForm.invoiceTitleTemplate)
+            TextField("Питание за день, ₽", text: $billingForm.mealDailyAmount)
+                .keyboardType(.decimalPad)
 
-            TextField("Шаблон описания", text: $billingForm.invoiceDescriptionTemplate, axis: .vertical)
-                .lineLimit(2...5)
+            TextField("Плата за день отпуска, ₽", text: $billingForm.vacationDailyAmount)
+                .keyboardType(.decimalPad)
 
-            TextField("День оплаты", text: $billingForm.dueDay)
+            TextField("Дней отпуска в год", text: $billingForm.vacationDaysPerYear)
                 .keyboardType(.numberPad)
 
-            Toggle("Учитывать отпускные дни", isOn: $billingForm.vacationDiscountEnabled)
+            TextField("Начало отпускного года, ДД.ММ.ГГГГ", text: $billingForm.vacationYearStart)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
-            if billingForm.vacationDiscountEnabled {
-                TextField("Ставка перерасчёта за день", text: $billingForm.vacationDailyRate)
-                    .keyboardType(.decimalPad)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Не начислять питание за дни, когда ученик:")
+                    .font(.subheadline)
 
-                TextField("Мин. рабочих дней для полной оплаты", text: $billingForm.minWorkingDaysForFullCharge)
-                    .keyboardType(.numberPad)
+                ForEach(MissedMealStatusOption.all, id: \.code) { option in
+                    Toggle(option.title, isOn: missedMealBinding(option.code))
+                        .font(.subheadline)
+                }
             }
+            .padding(.vertical, 4)
 
             Button {
                 Task {
@@ -257,32 +262,42 @@ struct FinanceAdminView: View {
         } header: {
             Text("Настройки начислений")
         } footer: {
-            Text("Эти настройки используются при предпросмотре и генерации детальных месячных счетов.")
+            Text("Используются при предпросмотре и создании помесячных счетов: обучение, питание по рабочим дням, перерасчёт питания и отпуск.")
         }
     }
 
     private var monthlyGenerationSection: some View {
         Section {
-            TextField("Период, например 2026-06", text: $billingPeriod)
+            TextField("Расчётный месяц, ГГГГ-ММ", text: $billingPeriod)
+                .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
-            TextField("Начало периода, YYYY-MM-DD", text: $periodStartsAt)
+            TextField("Месяц перерасчёта питания, ГГГГ-ММ", text: $correctionPeriod)
+                .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
-            TextField("Конец периода, YYYY-MM-DD", text: $periodEndsAt)
+            TextField("Срок оплаты, ДД.ММ.ГГГГ", text: $dueDate)
+                .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
-            TextField("Срок оплаты, YYYY-MM-DD", text: $dueDate)
-                .textInputAutocapitalization(.never)
+            Toggle(isOn: $overwriteExisting) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Перезаписать счета")
+                    Text("Пересоздать уже выставленные счета за этот месяц")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             Button {
                 Task {
                     _ = await viewModel.previewMonthlyInvoices(
                         api: appState.api,
                         billingPeriod: billingPeriod,
-                        periodStartsAt: periodStartsAt,
-                        periodEndsAt: periodEndsAt,
-                        dueDate: dueDate
+                        correctionPeriod: correctionPeriod
                     )
                 }
             } label: {
@@ -293,78 +308,30 @@ struct FinanceAdminView: View {
             Button {
                 isShowingGenerateConfirmation = true
             } label: {
-                Label("Создать детальные счета", systemImage: "doc.badge.plus")
+                Label("Создать счета", systemImage: "doc.badge.plus")
             }
             .disabled(viewModel.isSaving)
         } header: {
-            Text("Месячные начисления")
+            Text("Помесячные счета")
         } footer: {
-            Text("Сначала сделайте предпросмотр, проверьте суммы, потом создавайте счета.")
+            Text("Месяц перерасчёта по умолчанию — предыдущий. Срок оплаты можно не указывать. Без перезаписи ученики, у которых счёт за месяц уже есть, пропускаются.")
         }
     }
 
     private var monthlyPreviewSection: some View {
         Section("Предпросмотр начислений") {
             if let preview = viewModel.monthlyPreview {
-                LabeledContent("Период", value: AppDateFormatter.monthYear(preview.billing_period ?? billingPeriod))
-                LabeledContent("Счетов", value: "\(preview.total_count ?? preview.items.count)")
-                LabeledContent("Итого", value: preview.total_amount ?? "—")
+                LabeledContent("Месяц", value: AppDateFormatter.monthYear(preview.billing_period ?? billingPeriod))
+
+                if let correction = preview.correction_period, !correction.isEmpty {
+                    LabeledContent("Перерасчёт питания за", value: AppDateFormatter.monthYear(correction))
+                }
+
+                LabeledContent("Счетов", value: "\(preview.items.count)")
+                LabeledContent("Итого", value: FinanceMoney.plainString(preview.totalAmount))
 
                 ForEach(preview.items) { item in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.student_name)
-                                    .font(.headline)
-
-                                if let className = item.class_name {
-                                    Text(className)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-
-                            Spacer()
-
-                            Text(item.amount)
-                                .font(.headline)
-                        }
-
-                        HStack {
-                            if let base = item.base_amount {
-                                Label("База: \(base)", systemImage: "sum")
-                            }
-
-                            if let discount = item.discount_amount {
-                                Label("Скидка: \(discount)", systemImage: "minus.circle")
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                        HStack {
-                            if let workingDays = item.working_days {
-                                Label("Раб. дней: \(workingDays)", systemImage: "calendar")
-                            }
-
-                            if let vacationDays = item.vacation_days {
-                                Label("Отпуск: \(vacationDays)", systemImage: "sun.max")
-                            }
-
-                            if let payableDays = item.payable_days {
-                                Label("К оплате: \(payableDays)", systemImage: "checkmark.circle")
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                        if let comment = item.comment, !comment.isEmpty {
-                            Text(comment)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 6)
+                    MonthlyPreviewItemRow(item: item)
                 }
             } else {
                 Text("Предпросмотр ещё не сформирован.")
@@ -375,71 +342,50 @@ struct FinanceAdminView: View {
 
     private var workingDaysSection: some View {
         Section {
-            TextField("Период для рабочих дней", text: $billingPeriod)
+            TextField("Расчётный месяц, ГГГГ-ММ", text: $workingDaysPeriod)
+                .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
             Button {
                 Task {
                     await viewModel.loadWorkingDays(
                         api: appState.api,
-                        billingPeriod: billingPeriod
+                        billingPeriod: workingDaysPeriod
                     )
-
-                    workingDaysDraft = viewModel.workingDays
                 }
             } label: {
                 Label("Загрузить рабочие дни", systemImage: "calendar")
             }
 
-            if !workingDaysDraft.isEmpty {
-                ForEach(workingDaysDraft) { day in
-                    WorkingDayDraftRow(
-                        day: day,
-                        onToggle: {
-                            toggleWorkingDay(day)
-                        },
-                        onDelete: {
-                            workingDaysDraft.removeAll { $0.id == day.id }
-                        }
-                    )
-                }
-            }
+            if !viewModel.workingDays.isEmpty,
+               FinanceViewModel.isBillingPeriod(viewModel.workingDaysPeriod) {
+                LabeledContent("Месяц", value: AppDateFormatter.monthYear(viewModel.workingDaysPeriod))
+                LabeledContent("Рабочих дней", value: "\(viewModel.workingDays.filter(\.is_working_day).count)")
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Добавить день")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                TextField("Дата, YYYY-MM-DD", text: $newWorkingDayDate)
-                    .textInputAutocapitalization(.never)
-
-                Toggle("Рабочий день", isOn: $newWorkingDayIsWorking)
-
-                TextField("Комментарий", text: $newWorkingDayComment)
+                FinanceMonthDaysGrid(
+                    period: viewModel.workingDaysPeriod,
+                    selectedDates: Set(viewModel.workingDays.filter(\.is_working_day).map(\.day_date)),
+                    isEnabled: !viewModel.isSaving,
+                    onToggle: { date in
+                        viewModel.toggleWorkingDay(date)
+                    }
+                )
+                .padding(.vertical, 4)
 
                 Button {
-                    addWorkingDay()
+                    Task {
+                        _ = await viewModel.saveWorkingDays(api: appState.api)
+                    }
                 } label: {
-                    Label("Добавить день", systemImage: "plus.circle")
+                    Label("Сохранить рабочие дни", systemImage: "checkmark.circle.fill")
                 }
+                .disabled(viewModel.isSaving)
             }
-
-            Button {
-                Task {
-                    _ = await viewModel.saveWorkingDays(
-                        api: appState.api,
-                        billingPeriod: billingPeriod,
-                        days: workingDaysDraft
-                    )
-                }
-            } label: {
-                Label("Сохранить рабочие дни", systemImage: "checkmark.circle.fill")
-            }
-            .disabled(viewModel.isSaving || workingDaysDraft.isEmpty)
         } header: {
             Text("Рабочие дни")
         } footer: {
-            Text("Рабочие дни влияют на расчёт детальных счетов и отпускных перерасчётов.")
+            Text("Нажмите на день, чтобы сделать его рабочим или выходным. Питание начисляется за рабочие дни.")
         }
     }
 
@@ -453,106 +399,101 @@ struct FinanceAdminView: View {
                 }
             }
 
-            TextField("Период отпуска, например 2026-06", text: $vacationPeriod)
+            TextField("Начало отпускного года, ДД.ММ.ГГГГ", text: $vacationYearStart)
+                .keyboardType(.numbersAndPunctuation)
                 .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
 
             Button {
                 Task {
                     await viewModel.loadStudentVacation(
                         api: appState.api,
                         studentID: vacationStudentID,
-                        billingPeriod: vacationPeriod
+                        vacationYearStart: vacationYearStart
                     )
 
-                    vacationBalanceText = viewModel.studentVacation?.balance_days.map(String.init) ?? ""
-                    vacationDaysDraft = viewModel.studentVacation?.vacation_days ?? []
+                    applyLoadedVacation()
                 }
             } label: {
                 Label("Загрузить отпуск ученика", systemImage: "sun.max.fill")
             }
 
-            if let vacation = viewModel.studentVacation {
+            if let vacation = viewModel.studentVacation, vacation.student_id == vacationStudentID {
                 LabeledContent("Ученик", value: vacation.student_name ?? viewModel.studentName(for: vacation.student_id))
-                LabeledContent("Баланс дней", value: vacation.balance_days.map(String.init) ?? "—")
-                LabeledContent("Использовано", value: vacation.used_days.map(String.init) ?? "—")
-                LabeledContent("Доступно", value: vacation.available_days.map(String.init) ?? "—")
-            }
+                LabeledContent("Отпускной год с", value: AppDateFormatter.date(vacation.vacation_year_start))
+                LabeledContent("Лимит в год", value: vacation.vacation_days_per_year.map(String.init) ?? "—")
+                LabeledContent("Использовано", value: "\(vacation.used_days_total ?? 0)")
+                LabeledContent("Осталось", value: "\(vacation.remaining_days ?? 0)")
 
-            TextField("Баланс отпускных дней", text: $vacationBalanceText)
-                .keyboardType(.numberPad)
-
-            Button {
-                Task {
-                    _ = await viewModel.saveStudentVacationBalance(
-                        api: appState.api,
-                        studentID: vacationStudentID,
-                        billingPeriod: vacationPeriod,
-                        balanceDays: Int(vacationBalanceText) ?? 0
-                    )
-                }
-            } label: {
-                Label("Сохранить баланс", systemImage: "checkmark.circle")
-            }
-
-            if !vacationDaysDraft.isEmpty {
-                ForEach(vacationDaysDraft) { day in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(AppDateFormatter.date(day.date))
-                                .font(.headline)
-
-                            if let comment = day.comment, !comment.isEmpty {
-                                Text(comment)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer()
-
-                        Button(role: .destructive) {
-                            vacationDaysDraft.removeAll { $0.id == day.id }
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Добавить день отпуска")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                TextField("Дата, YYYY-MM-DD", text: $newVacationDate)
-                    .textInputAutocapitalization(.never)
-
-                TextField("Комментарий", text: $newVacationComment)
+                TextField("Дней отпуска, использованных ранее", text: $vacationUsedDaysText)
+                    .keyboardType(.numberPad)
 
                 Button {
-                    addVacationDay()
-                } label: {
-                    Label("Добавить день отпуска", systemImage: "plus.circle")
-                }
-            }
+                    Task {
+                        _ = await viewModel.saveStudentVacationBalance(
+                            api: appState.api,
+                            studentID: vacationStudentID,
+                            vacationYearStart: vacationYearStart,
+                            usedDaysInitialText: vacationUsedDaysText
+                        )
 
-            Button {
-                Task {
-                    _ = await viewModel.saveStudentVacationDays(
-                        api: appState.api,
-                        studentID: vacationStudentID,
-                        billingPeriod: vacationPeriod,
-                        days: vacationDaysDraft
-                    )
+                        applyLoadedVacation()
+                    }
+                } label: {
+                    Label("Сохранить использованные дни", systemImage: "checkmark.circle")
                 }
-            } label: {
-                Label("Сохранить дни отпуска", systemImage: "checkmark.circle.fill")
+                .disabled(viewModel.isSaving)
+
+                TextField("Месяц отпуска, ГГГГ-ММ", text: $vacationPeriod)
+                    .keyboardType(.numbersAndPunctuation)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onChange(of: vacationPeriod) {
+                        vacationSelectedDays = Set(vacation.days)
+                    }
+
+                if FinanceViewModel.isBillingPeriod(vacationPeriod) {
+                    LabeledContent("Отмечено в месяце", value: "\(selectedVacationDaysInPeriod.count)")
+
+                    FinanceMonthDaysGrid(
+                        period: vacationPeriod,
+                        selectedDates: vacationSelectedDays,
+                        isEnabled: !viewModel.isSaving,
+                        onToggle: { date in
+                            if vacationSelectedDays.contains(date) {
+                                vacationSelectedDays.remove(date)
+                            } else {
+                                vacationSelectedDays.insert(date)
+                            }
+                        }
+                    )
+                    .padding(.vertical, 4)
+
+                    Button {
+                        Task {
+                            _ = await viewModel.saveStudentVacationDays(
+                                api: appState.api,
+                                studentID: vacationStudentID,
+                                billingPeriod: vacationPeriod,
+                                days: vacationSelectedDays
+                            )
+
+                            applyLoadedVacation()
+                        }
+                    } label: {
+                        Label("Сохранить дни отпуска", systemImage: "checkmark.circle.fill")
+                    }
+                    .disabled(viewModel.isSaving)
+                } else {
+                    Text("Укажите месяц в формате ГГГГ-ММ, чтобы отметить дни отпуска.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .disabled(viewModel.isSaving)
         } header: {
             Text("Отпуска учеников")
         } footer: {
-            Text("Отпускные дни будут отображаться родителям в детализации начислений.")
+            Text("Пустое начало года — берётся из настроек начислений. Дни отпуска сверх годового лимита оплачиваются полностью.")
         }
     }
 
@@ -629,21 +570,23 @@ struct FinanceAdminView: View {
             } else {
                 ForEach(viewModel.payerInns) { item in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(item.payer_name)
+                        Text(item.payer_name.flatMap { $0.isEmpty ? nil : $0 } ?? "ИНН \(item.inn)")
                             .font(.headline)
 
-                        Text("ИНН: \(item.inn)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if item.payer_name?.isEmpty == false {
+                            Text("ИНН: \(item.inn)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
                         Text(item.student_name ?? viewModel.studentName(for: item.student_id))
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                        if let comment = item.comment, !comment.isEmpty {
-                            Text(comment)
+                        if item.is_active == false {
+                            Text("Не активен")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.orange)
                         }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -782,130 +725,174 @@ struct FinanceAdminView: View {
     private func prepareForms() {
         billingForm = BillingSettingsFormData(settings: viewModel.billingSettings)
 
+        let nextPeriod = viewModel.filtersNextMonthDTO?.billing_period
+            ?? viewModel.overview?.next_billing_period
+            ?? ""
+
         if billingPeriod.isEmpty {
-            billingPeriod = viewModel.filtersNextMonthDTO?.billing_period
-                ?? viewModel.overview?.next_billing_period
-                ?? ""
+            billingPeriod = nextPeriod
         }
 
-        if periodStartsAt.isEmpty {
-            periodStartsAt = viewModel.filtersNextMonthDTO?.period_starts_at
-                ?? viewModel.overview?.next_period_starts_at
-                ?? ""
-        }
-
-        if periodEndsAt.isEmpty {
-            periodEndsAt = viewModel.filtersNextMonthDTO?.period_ends_at
-                ?? viewModel.overview?.next_period_ends_at
-                ?? ""
-        }
-
-        if dueDate.isEmpty {
-            dueDate = viewModel.filtersNextMonthDTO?.due_date
-                ?? viewModel.overview?.next_due_date
-                ?? ""
+        if workingDaysPeriod.isEmpty {
+            workingDaysPeriod = nextPeriod
         }
 
         if vacationPeriod.isEmpty {
-            vacationPeriod = billingPeriod
+            vacationPeriod = nextPeriod
+        }
+
+        if vacationYearStart.isEmpty {
+            vacationYearStart = AdminDateInput.display(fromISO: viewModel.billingSettings?.vacation_year_start)
         }
     }
 
-    private func addWorkingDay() {
-        let date = newWorkingDayDate.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !date.isEmpty else {
+    private func applyLoadedVacation() {
+        guard let vacation = viewModel.studentVacation, vacation.student_id == vacationStudentID else {
             return
         }
 
-        workingDaysDraft.removeAll { $0.date == date }
+        vacationUsedDaysText = vacation.used_days_initial.map(String.init) ?? "0"
+        vacationSelectedDays = Set(vacation.days)
 
-        workingDaysDraft.append(
-            WorkingDayDTO(
-                date: date,
-                is_working: newWorkingDayIsWorking,
-                comment: newWorkingDayComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newWorkingDayComment
-            )
-        )
+        let loadedYearStart = AdminDateInput.display(fromISO: vacation.vacation_year_start)
 
-        workingDaysDraft.sort { $0.date < $1.date }
-
-        newWorkingDayDate = ""
-        newWorkingDayComment = ""
-        newWorkingDayIsWorking = true
+        if !loadedYearStart.isEmpty {
+            vacationYearStart = loadedYearStart
+        }
     }
 
-    private func toggleWorkingDay(_ day: WorkingDayDTO) {
-        guard let index = workingDaysDraft.firstIndex(where: { $0.id == day.id }) else {
-            return
+    private var selectedVacationDaysInPeriod: [String] {
+        guard let bounds = FinanceViewModel.monthBounds(vacationPeriod) else {
+            return []
         }
 
-        workingDaysDraft[index] = WorkingDayDTO(
-            date: day.date,
-            is_working: !day.is_working,
-            comment: day.comment
-        )
+        return vacationSelectedDays.filter { $0 >= bounds.first && $0 <= bounds.last }.sorted()
     }
 
-    private func addVacationDay() {
-        let date = newVacationDate.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !date.isEmpty else {
-            return
-        }
-
-        vacationDaysDraft.removeAll { $0.date == date }
-
-        vacationDaysDraft.append(
-            StudentVacationDayDTO(
-                date: date,
-                comment: newVacationComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newVacationComment
-            )
+    private func missedMealBinding(_ code: String) -> Binding<Bool> {
+        Binding(
+            get: { billingForm.missedMealStatuses.contains(code) },
+            set: { isOn in
+                if isOn {
+                    billingForm.missedMealStatuses.insert(code)
+                } else {
+                    billingForm.missedMealStatuses.remove(code)
+                }
+            }
         )
-
-        vacationDaysDraft.sort { $0.date < $1.date }
-
-        newVacationDate = ""
-        newVacationComment = ""
     }
 }
 
-private struct WorkingDayDraftRow: View {
-    let day: WorkingDayDTO
-    let onToggle: () -> Void
-    let onDelete: () -> Void
+private struct MonthlyPreviewItemRow: View {
+    let item: MonthlyInvoicePreviewItemDTO
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(AppDateFormatter.date(day.date))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.student_name)
+                        .font(.headline)
+
+                    if let className = item.class_name, !className.isEmpty {
+                        Text(className)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                Text(item.total_amount)
                     .font(.headline)
+            }
 
-                Text(day.is_working ? "Рабочий день" : "Выходной")
-                    .font(.caption)
-                    .foregroundStyle(day.is_working ? .green : .orange)
+            Group {
+                Text("Обучение: \(item.tuition_amount ?? "—")")
+                Text("Питание: \(item.meal_days ?? 0) дн. × \(item.meal_daily_amount ?? "—") = \(item.meal_amount ?? "—")")
 
-                if let comment = day.comment, !comment.isEmpty {
-                    Text(comment)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if (item.missed_meal_days ?? 0) > 0 {
+                    Text("Перерасчёт питания: \(item.missed_meal_days ?? 0) дн. = \(item.meal_correction_amount ?? "—")")
+                }
+
+                if (item.vacation_days ?? 0) > 0 {
+                    Text("Отпуск: \(item.vacation_chargeable_days ?? 0) дн. × \(item.vacation_daily_amount ?? "—") = \(item.vacation_amount ?? "—")")
+
+                    if (item.vacation_over_limit_days ?? 0) > 0 {
+                        Text("Сверх лимита: \(item.vacation_over_limit_days ?? 0) дн.")
+                    }
                 }
             }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+}
 
-            Spacer()
+/// Сетка дней месяца `period` (ГГГГ-ММ) по неделям с понедельника; отмеченные дни — ISO-даты.
+private struct FinanceMonthDaysGrid: View {
+    let period: String
+    let selectedDates: Set<String>
+    let isEnabled: Bool
+    let onToggle: (String) -> Void
 
-            Button {
-                onToggle()
-            } label: {
-                Image(systemName: day.is_working ? "checkmark.circle.fill" : "xmark.circle.fill")
+    private let weekdayTitles = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 4) {
+            ForEach(weekdayTitles, id: \.self) { title in
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Image(systemName: "trash")
+            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                if let cell {
+                    let isSelected = selectedDates.contains(cell.iso)
+
+                    Button {
+                        onToggle(cell.iso)
+                    } label: {
+                        Text("\(cell.day)")
+                            .font(.callout)
+                            .fontWeight(isSelected ? .bold : .regular)
+                            .frame(maxWidth: .infinity, minHeight: 34)
+                            .background(isSelected ? AppTheme.primaryDark : AppTheme.cardSoft)
+                            .foregroundStyle(isSelected ? Color.white : AppTheme.text)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isEnabled)
+                } else {
+                    Color.clear
+                        .frame(minHeight: 34)
+                }
             }
         }
+    }
+
+    private var cells: [(day: Int, iso: String)?] {
+        guard let bounds = FinanceViewModel.monthBounds(period),
+              let first = AdminDateInput.date(fromISO: bounds.first),
+              let last = AdminDateInput.date(fromISO: bounds.last) else {
+            return []
+        }
+
+        let calendar = Calendar(identifier: .gregorian)
+        // weekday: 1 — воскресенье … 7 — суббота → сдвиг от понедельника.
+        let leadingBlanks = (calendar.component(.weekday, from: first) + 5) % 7
+        let dayCount = calendar.component(.day, from: last)
+
+        var result: [(day: Int, iso: String)?] = Array(repeating: nil, count: leadingBlanks)
+
+        for offset in 0..<dayCount {
+            if let date = calendar.date(byAdding: .day, value: offset, to: first) {
+                result.append((offset + 1, AdminDateInput.iso(from: date)))
+            }
+        }
+
+        return result
     }
 }
 
@@ -1013,18 +1000,27 @@ struct StudentPayerInnFormView: View {
                 }
 
                 Section("Плательщик") {
-                    Picker("Ученик", selection: $formData.studentID) {
-                        Text("Выберите ученика").tag(0)
+                    if item == nil {
+                        Picker("Ученик", selection: $formData.studentID) {
+                            Text("Выберите ученика").tag(0)
 
-                        ForEach(students) { student in
-                            Text(student.student_name).tag(student.id)
+                            ForEach(students) { student in
+                                Text(student.student_name).tag(student.id)
+                            }
                         }
+                    } else {
+                        // Сервер не меняет ученика у существующей связи.
+                        LabeledContent(
+                            "Ученик",
+                            value: item?.student_name
+                                ?? students.first { $0.id == formData.studentID }?.student_name
+                                ?? "—"
+                        )
                     }
 
-                    TextField("ФИО плательщика", text: $formData.payerName)
-                    TextField("ИНН", text: $formData.inn)
-                    TextField("Комментарий", text: $formData.comment, axis: .vertical)
-                        .lineLimit(2...5)
+                    TextField("Имя плательщика (необязательно)", text: $formData.payerName)
+                    TextField("ИНН (10 или 12 цифр)", text: $formData.inn)
+                        .keyboardType(.numberPad)
                     Toggle("Активно", isOn: $formData.isActive)
                 }
             }

@@ -17,6 +17,7 @@ struct FinanceView: View {
     @State private var isShowingDeletePaymentConfirmation = false
     @State private var isShowingGenerateConfirmation = false
     @State private var isShowingFinanceAdmin = false
+    @State private var nextMonthAmount = ""
 
     var body: some View {
         NavigationStack {
@@ -325,22 +326,47 @@ struct FinanceView: View {
                     Text("Платёж на сумму \(paymentToDelete.amount) будет удалён.")
                 }
             }
-            .confirmationDialog(
-                "Создать счета на следующий месяц?",
-                isPresented: $isShowingGenerateConfirmation,
-                titleVisibility: .visible
+            .alert(
+                "Счета на следующий месяц",
+                isPresented: $isShowingGenerateConfirmation
             ) {
+                TextField("Сумма, ₽", text: $nextMonthAmount)
+                    .keyboardType(.decimalPad)
+
                 Button("Создать счета") {
+                    let amount = nextMonthAmount
+
                     Task {
-                        _ = await viewModel.generateNextMonthInvoices(api: appState.api)
+                        let created = await viewModel.generateNextMonthInvoices(
+                            api: appState.api,
+                            amountText: amount
+                        )
+
+                        if created {
+                            nextMonthAmount = ""
+                        }
                     }
                 }
+                .disabled(!isNextMonthAmountValid)
 
                 Button("Отмена", role: .cancel) {}
             } message: {
-                Text("Будут созданы счета на следующий расчётный период.")
+                Text(nextMonthMessage)
             }
         }
+    }
+
+    private var isNextMonthAmountValid: Bool {
+        guard let amount = FinanceMoney.decimal(from: nextMonthAmount) else {
+            return false
+        }
+
+        return amount > 0
+    }
+
+    private var nextMonthMessage: String {
+        let period = viewModel.nextMonthLabel.map { " за \($0)" } ?? ""
+        return "Счёт на эту сумму получит каждый активный ученик\(period). Уже выставленные счета за этот месяц не перезаписываются."
     }
 
     private var financeList: some View {

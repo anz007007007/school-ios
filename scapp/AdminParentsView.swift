@@ -529,7 +529,7 @@ struct AdminEditParentView: View {
                 }
             } message: {
                 if let student = studentToDetach {
-                    Text("Ученик \(student.name) будет отвязан от родителя.")
+                    Text("Связь с записью «\(student.name)» будет удалена.")
                 }
             }
         }

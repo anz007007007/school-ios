@@ -89,13 +89,26 @@ final class AdminTermsViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
 
+        guard let startsAtISO = AdminDateInput.iso(fromDisplay: startsAt),
+              let endsAtISO = AdminDateInput.iso(fromDisplay: endsAt) else {
+            errorMessage = "Укажите даты периода в формате ДД.ММ.ГГГГ"
+            isSaving = false
+            return false
+        }
+
+        guard startsAtISO <= endsAtISO else {
+            errorMessage = "Дата окончания раньше даты начала"
+            isSaving = false
+            return false
+        }
+
         do {
             let body: [String: Any] = [
                 "name": name,
                 "academic_year": academicYear,
                 "term_type": termType,
-                "starts_at": startsAt,
-                "ends_at": endsAt,
+                "starts_at": startsAtISO,
+                "ends_at": endsAtISO,
                 "is_active": isActive
             ]
 
@@ -132,13 +145,26 @@ final class AdminTermsViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
 
+        guard let startsAtISO = AdminDateInput.iso(fromDisplay: startsAt),
+              let endsAtISO = AdminDateInput.iso(fromDisplay: endsAt) else {
+            errorMessage = "Укажите даты периода в формате ДД.ММ.ГГГГ"
+            isSaving = false
+            return false
+        }
+
+        guard startsAtISO <= endsAtISO else {
+            errorMessage = "Дата окончания раньше даты начала"
+            isSaving = false
+            return false
+        }
+
         do {
             let body: [String: Any] = [
                 "name": name,
                 "academic_year": academicYear,
                 "term_type": termType,
-                "starts_at": startsAt,
-                "ends_at": endsAt,
+                "starts_at": startsAtISO,
+                "ends_at": endsAtISO,
                 "is_active": isActive
             ]
 
@@ -264,11 +290,7 @@ enum AdminTermsError: LocalizedError {
         case .badResponse:
             return "Некорректный ответ сервера."
         case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
-            }
+            return APIRequestError.readableServerError(statusCode: statusCode, text: text)
         }
     }
 }
