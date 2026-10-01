@@ -121,6 +121,7 @@ struct MessagesView: View {
                     dateTitle: viewModel.dateTimeTitle(message.created_at),
                     canManage: appState.canSendMessages,
                     canMarkRead: message.isIncoming(for: appState.currentUser?.id),
+                    isArchived: viewModel.selectedFolder == .archive,
                     onMarkRead: {
                         selectedMessage = nil
 
@@ -136,10 +137,17 @@ struct MessagesView: View {
                         selectedMessage = nil
 
                         Task {
-                            _ = await viewModel.archiveMessage(
-                                api: appState.api,
-                                message: message
-                            )
+                            if viewModel.selectedFolder == .archive {
+                                _ = await viewModel.unarchiveMessage(
+                                    api: appState.api,
+                                    message: message
+                                )
+                            } else {
+                                _ = await viewModel.archiveMessage(
+                                    api: appState.api,
+                                    message: message
+                                )
+                            }
                         }
                     }
                 )
@@ -148,7 +156,7 @@ struct MessagesView: View {
                 AnnouncementDetailView(
                     announcement: announcement,
                     dateTitle: viewModel.dateTimeTitle(announcement.created_at),
-                    audienceTitle: viewModel.audienceTitle(announcement.target_audience)
+                    audienceTitle: viewModel.announcementAudienceTitle(announcement)
                 )
             }
             .sheet(isPresented: $isShowingComposeMessage) {
@@ -303,7 +311,7 @@ struct MessagesView: View {
                     AnnouncementRowView(
                         announcement: announcement,
                         dateTitle: viewModel.dateTimeTitle(announcement.created_at),
-                        audienceTitle: viewModel.audienceTitle(announcement.target_audience)
+                        audienceTitle: viewModel.announcementAudienceTitle(announcement)
                     )
                 }
                 .buttonStyle(.plain)
@@ -397,17 +405,31 @@ struct MessagesView: View {
                             }
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button {
-                                    Task {
-                                        _ = await viewModel.archiveMessage(
-                                            api: appState.api,
-                                            message: message
-                                        )
+                                if viewModel.selectedFolder == .archive {
+                                    Button {
+                                        Task {
+                                            _ = await viewModel.unarchiveMessage(
+                                                api: appState.api,
+                                                message: message
+                                            )
+                                        }
+                                    } label: {
+                                        Label("Вернуть", systemImage: "tray.and.arrow.up")
                                     }
-                                } label: {
-                                    Label("В архив", systemImage: "archivebox")
+                                    .tint(.green)
+                                } else {
+                                    Button {
+                                        Task {
+                                            _ = await viewModel.archiveMessage(
+                                                api: appState.api,
+                                                message: message
+                                            )
+                                        }
+                                    } label: {
+                                        Label("В архив", systemImage: "archivebox")
+                                    }
+                                    .tint(.blue)
                                 }
-                                .tint(.blue)
 
                                 if !message.is_read && message.isIncoming(for: appState.currentUser?.id) {
                                     Button {
@@ -568,6 +590,7 @@ struct MessageDetailView: View {
     let dateTitle: String
     let canManage: Bool
     let canMarkRead: Bool
+    var isArchived: Bool = false
     let onMarkRead: () -> Void
     let onArchive: () -> Void
 
@@ -615,14 +638,13 @@ struct MessageDetailView: View {
                     LabeledContent("От", value: message.sender_name)
                     LabeledContent("Кому", value: message.recipient_name)
                     LabeledContent("Дата", value: dateTitle)
-                    LabeledContent("ID", value: "\(message.id)")
 
                     if let senderRole = message.sender_role_code {
-                        LabeledContent("Роль отправителя", value: senderRole)
+                        LabeledContent("Роль отправителя", value: MessagesViewModel.roleTitle(senderRole))
                     }
 
                     if let recipientRole = message.recipient_role_code {
-                        LabeledContent("Роль получателя", value: recipientRole)
+                        LabeledContent("Роль получателя", value: MessagesViewModel.roleTitle(recipientRole))
                     }
                 }
 
@@ -638,7 +660,11 @@ struct MessageDetailView: View {
                     Button {
                         onArchive()
                     } label: {
-                        Label("В архив", systemImage: "archivebox")
+                        if isArchived {
+                            Label("Вернуть из архива", systemImage: "tray.and.arrow.up")
+                        } else {
+                            Label("В архив", systemImage: "archivebox")
+                        }
                     }
                 }
             }
@@ -704,7 +730,6 @@ struct AnnouncementDetailView: View {
                     LabeledContent("Автор", value: announcement.author_name)
                     LabeledContent("Аудитория", value: audienceTitle)
                     LabeledContent("Дата", value: dateTitle)
-                    LabeledContent("ID", value: "\(announcement.id)")
                 }
             }
             .navigationTitle("Объявление")

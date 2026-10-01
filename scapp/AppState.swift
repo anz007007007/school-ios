@@ -1178,14 +1178,17 @@ final class AppState: ObservableObject {
         )
     }
 
+    /// Документы (routers/documents.py): управлять могут только admin/manager
+    /// (_ensure_can_manage_documents), право по permission тут не помогает — сервер ответит 403.
     var canManageDocuments: Bool {
-        hasAnyPermission([
-            "documents:create",
-            "documents:update",
-            "documents:delete",
-            "documents:generate",
-            "admin:documents"
-        ])
+        isAdmin || isManager
+    }
+
+    /// Профили, ученики и сгенерированные документы (_append_profile_access_filter):
+    /// admin/manager — все, parent/student — свои, остальным ролям сервер отвечает 403.
+    /// Публичные документы доступны всем.
+    var canReadDocumentProfiles: Bool {
+        isAdmin || isManager || isParent || isStudent
     }
 
     var canViewTextbooks: Bool {

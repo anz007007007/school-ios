@@ -3,7 +3,23 @@ import ImageIO
 import UniformTypeIdentifiers
 import SchoolAPIClient
 
+/// Ошибки подготовки и загрузки изображения: текст показывается пользователю как есть
+/// (APIRequestError.networkError добавил бы ложное «Ошибка сети:»).
+enum CommunityImageError: LocalizedError {
+    case message(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .message(let text):
+            return text
+        }
+    }
+}
+
 enum CommunityImageUploadService {
+    /// Как MAX_COMMUNITY_IMAGE_SIZE_BYTES на сервере (routers/community_ads.py).
+    static let maxUploadSizeBytes = 8 * 1024 * 1024
+
     private struct PreparedUploadFile {
         let fileURL: URL
         let fileName: String
@@ -19,16 +35,16 @@ enum CommunityImageUploadService {
         print("COMMUNITY SERVICE PICKED MIME:", picked.mimeType)
 
         guard picked.fileSize > 0 else {
-            throw APIRequestError.networkError("Файл пустой.")
+            throw CommunityImageError.message("Файл пустой.")
         }
 
         guard picked.fileSize <= 25 * 1024 * 1024 else {
-            throw APIRequestError.networkError("Файл слишком большой. Максимум 25 МБ до сжатия.")
+            throw CommunityImageError.message("Файл слишком большой (больше 25 МБ). Выберите изображение поменьше: после сжатия оно должно быть не больше 8 МБ.")
         }
 
         let uploadSource: PreparedUploadFile
 
-        if picked.fileSize <= 8 * 1024 * 1024 {
+        if picked.fileSize <= maxUploadSizeBytes {
             uploadSource = PreparedUploadFile(
                 fileURL: picked.fileURL,
                 fileName: picked.fileName,
@@ -57,7 +73,7 @@ enum CommunityImageUploadService {
         _ picked: CommunityPickedImage
     ) throws -> PreparedUploadFile {
         guard let source = CGImageSourceCreateWithURL(picked.fileURL as CFURL, nil) else {
-            throw APIRequestError.networkError("Не удалось прочитать изображение.")
+            throw CommunityImageError.message("Не удалось прочитать изображение.")
         }
 
         let options: [CFString: Any] = [
@@ -67,7 +83,7 @@ enum CommunityImageUploadService {
         ]
 
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            throw APIRequestError.networkError("Не удалось подготовить изображение.")
+            throw CommunityImageError.message("Не удалось подготовить изображение.")
         }
 
         let outputURL = FileManager.default.temporaryDirectory
@@ -80,7 +96,7 @@ enum CommunityImageUploadService {
             1,
             nil
         ) else {
-            throw APIRequestError.networkError("Не удалось создать файл изображения.")
+            throw CommunityImageError.message("Не удалось создать файл изображения.")
         }
 
         let destinationOptions: [CFString: Any] = [
@@ -90,18 +106,18 @@ enum CommunityImageUploadService {
         CGImageDestinationAddImage(destination, thumbnail, destinationOptions as CFDictionary)
 
         guard CGImageDestinationFinalize(destination) else {
-            throw APIRequestError.networkError("Не удалось сжать изображение.")
+            throw CommunityImageError.message("Не удалось сжать изображение.")
         }
 
         let values = try outputURL.resourceValues(forKeys: [.fileSizeKey])
         let outputSize = values.fileSize ?? 0
 
         guard outputSize > 0 else {
-            throw APIRequestError.networkError("Файл пустой после подготовки.")
+            throw CommunityImageError.message("Файл пустой после подготовки.")
         }
 
-        guard outputSize <= 8 * 1024 * 1024 else {
-            throw APIRequestError.networkError("Изображение слишком большое после сжатия. Максимум 8 МБ.")
+        guard outputSize <= maxUploadSizeBytes else {
+            throw CommunityImageError.message("Изображение слишком большое даже после сжатия. Максимальный размер изображения — 8 МБ.")
         }
 
         try? FileManager.default.removeItem(at: picked.fileURL)
@@ -126,15 +142,15 @@ enum CommunityImageUploadService {
         print("COMMUNITY SERVICE UPLOAD FILE SIZE:", fileSize)
 
         guard fileSize > 0 else {
-            throw APIRequestError.networkError("Файл пустой.")
+            throw CommunityImageError.message("Файл пустой.")
         }
 
-        guard fileSize <= 8 * 1024 * 1024 else {
-            throw APIRequestError.networkError("Файл слишком большой. Максимум 8 МБ.")
+        guard fileSize <= maxUploadSizeBytes else {
+            throw CommunityImageError.message("Файл слишком большой. Максимальный размер изображения — 8 МБ.")
         }
 
         guard mimeType == "image/jpeg" || mimeType == "image/png" || mimeType == "image/webp" else {
-            throw APIRequestError.networkError("Поддерживаются только JPEG, PNG и WEBP.")
+            throw CommunityImageError.message("Поддерживаются только JPEG, PNG и WEBP.")
         }
 
         guard let token = api.authToken else {
@@ -191,6 +207,10 @@ enum CommunityImageUploadService {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
+            if let message = readableUploadError(statusCode: httpResponse.statusCode, text: responseText) {
+                throw CommunityImageError.message(message)
+            }
+
             throw APIRequestError.serverError(
                 statusCode: httpResponse.statusCode,
                 text: responseText
@@ -199,6 +219,41 @@ enum CommunityImageUploadService {
 
         let decoded = try JSONDecoder().decode(CommunityImageUploadResponseDTO.self, from: responseData)
         return decoded.url
+    }
+
+    /// Переводит известные ответы сервера на загрузку изображения.
+    private static func readableUploadError(statusCode: Int, text: String) -> String? {
+        if statusCode == 413 {
+            return "Файл слишком большой. Максимальный размер изображения — 8 МБ."
+        }
+
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = (json["detail"] as? String)?.lowercased() else {
+            return nil
+        }
+
+        if detail.contains("too large") {
+            return "Файл слишком большой. Максимальный размер изображения — 8 МБ."
+        }
+
+        if detail.contains("only jpeg") {
+            return "Поддерживаются только изображения JPEG, PNG и WEBP."
+        }
+
+        if detail.contains("empty") {
+            return "Файл пустой."
+        }
+
+        if detail.contains("no access") {
+            return "Загружать изображения могут только администратор, менеджер и родители."
+        }
+
+        if detail.contains("image") {
+            return "Не удалось обработать изображение. Выберите другой файл."
+        }
+
+        return nil
     }
 
     private static func makeMultipartUploadFileFromFile(

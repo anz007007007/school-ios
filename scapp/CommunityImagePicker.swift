@@ -35,7 +35,7 @@ enum CommunityImagePickerError: LocalizedError {
         case .unsupportedType:
             return "Поддерживаются только JPEG, PNG и WEBP."
         case .fileTooLarge:
-            return "Файл слишком большой. Максимум 25 МБ до сжатия."
+            return "Файл слишком большой (больше 25 МБ). Выберите изображение поменьше: после сжатия оно должно быть не больше 8 МБ."
         case .emptyFile:
             return "Файл пустой или недоступен."
         case .cannotReadFile:

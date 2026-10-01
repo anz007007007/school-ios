@@ -15,7 +15,6 @@ final class MessagesViewModel: ObservableObject {
     @Published var showOnlyImportant = false
     @Published var hideReadAnnouncements = true
     @Published var readAnnouncementIDs: Set<Int> = []
-    @Published var archivedMessageIDs: Set<Int> = []
     @Published var searchText = ""
     @Published var currentUserID: Int?
 
@@ -70,72 +69,50 @@ final class MessagesViewModel: ObservableObject {
             rawValue
         }
 
-        var apiValue: String? {
+        /// Значение параметра `box` на сервере: all | inbox | sent | archived.
+        var apiValue: String {
             switch self {
             case .inbox:
                 return "inbox"
             case .sent:
                 return "sent"
             case .archive:
-                return "archive"
+                return "archived"
             case .all:
-                return nil
+                return "all"
             }
         }
     }
 
-    let archiveStateCode = "archive"
+    /// Варианты аудитории объявления. Сервер принимает target_audience
+    /// all | role | class | class_parents | class_students | class_teachers,
+    /// для role обязателен target_role_code.
+    struct AudienceOption {
+        let code: String
+        let title: String
+        let targetAudience: String
+        let targetRoleCode: String?
+    }
 
-    let audiences: [(code: String, title: String)] = [
-        ("all", "Все"),
-        ("teachers", "Учителя"),
-        ("parents", "Родители"),
-        ("students", "Ученики")
+    let audienceOptions: [AudienceOption] = [
+        AudienceOption(code: "all", title: "Все", targetAudience: "all", targetRoleCode: nil),
+        AudienceOption(code: "teacher", title: "Учителя", targetAudience: "role", targetRoleCode: "teacher"),
+        AudienceOption(code: "parent", title: "Родители", targetAudience: "role", targetRoleCode: "parent"),
+        AudienceOption(code: "student", title: "Ученики", targetAudience: "role", targetRoleCode: "student")
     ]
 
+    var audiences: [(code: String, title: String)] {
+        audienceOptions.map { (code: $0.code, title: $0.title) }
+    }
+
     var filteredMessages: [MessageDTO] {
+        // Папку (box) фильтрует сервер, здесь только дополнительные фильтры.
         var result = messages
 
-        if let currentUserID {
-            switch selectedFolder {
-            case .inbox:
-                result = result.filter {
-                    $0.recipient_user_id == currentUserID
-                    && !archivedMessageIDs.contains($0.id)
-                }
-
-            case .sent:
-                result = result.filter {
-                    $0.sender_user_id == currentUserID
-                    && !archivedMessageIDs.contains($0.id)
-                }
-
-            case .archive:
-                result = result.filter {
-                    archivedMessageIDs.contains($0.id)
-                }
-
-            case .all:
-                result = result.filter {
-                    !archivedMessageIDs.contains($0.id)
-                }
-            }
-        } else {
-            switch selectedFolder {
-            case .archive:
-                result = result.filter {
-                    archivedMessageIDs.contains($0.id)
-                }
-
-            case .inbox, .sent, .all:
-                result = result.filter {
-                    !archivedMessageIDs.contains($0.id)
-                }
-            }
-        }
-
-        if showOnlyUnread {
-            result = result.filter { !$0.is_read }
+        // В архиве и отправленных «непрочитанные» не имеют смысла для пользователя:
+        // архив почти целиком состоит из прочитанных писем.
+        if showOnlyUnread && (selectedFolder == .inbox || selectedFolder == .all) {
+            result = result.filter { !$0.is_read || !$0.isIncoming(for: currentUserID) }
         }
 
         if showOnlyImportant {
@@ -196,7 +173,8 @@ final class MessagesViewModel: ObservableObject {
 
     func loadInitialData(api: SchoolAPI) async {
         loadReadAnnouncementIDs()
-        loadArchivedMessageIDs()
+        // Раньше архив хранился локально; теперь его отдаёт сервер (box=archived).
+        UserDefaults.standard.removeObject(forKey: "archived_message_ids")
 
         isLoading = true
         errorMessage = nil
@@ -260,9 +238,7 @@ final class MessagesViewModel: ObservableObject {
         do {
             var queryItems: [URLQueryItem] = []
 
-            if let folder = selectedFolder.apiValue {
-                queryItems.append(URLQueryItem(name: "folder", value: folder))
-            }
+            queryItems.append(URLQueryItem(name: "box", value: selectedFolder.apiValue))
 
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !query.isEmpty {
@@ -516,13 +492,26 @@ final class MessagesViewModel: ObservableObject {
             return false
         }
 
+        guard cleanTitle.count >= 2 else {
+            errorMessage = "Заголовок объявления должен быть не короче 2 символов"
+            isSaving = false
+            return false
+        }
+
+        let audience = audienceOptions.first { $0.code == formData.targetAudience }
+            ?? audienceOptions[0]
+
         do {
-            let body: [String: Any] = [
+            var body: [String: Any] = [
                 "title": cleanTitle,
                 "body": cleanBody,
-                "target_audience": formData.targetAudience,
+                "target_audience": audience.targetAudience,
                 "is_important": formData.isImportant
             ]
+
+            if let roleCode = audience.targetRoleCode {
+                body["target_role_code"] = roleCode
+            }
 
             _ = try await sendRequest(
                 api: api,
@@ -596,28 +585,21 @@ final class MessagesViewModel: ObservableObject {
         api: SchoolAPI,
         message: MessageDTO
     ) async -> Bool {
-        let success = await updateMessageState(
-            api: api,
-            message: message,
-            state: archiveStateCode
-        )
-
-        if success {
-            archivedMessageIDs.insert(message.id)
-            saveArchivedMessageIDs()
-
-            if selectedFolder != .archive {
-                messages.removeAll { $0.id == message.id }
-            }
-        }
-
-        return success
+        await updateMessageState(api: api, message: message, isArchived: true)
     }
 
+    func unarchiveMessage(
+        api: SchoolAPI,
+        message: MessageDTO
+    ) async -> Bool {
+        await updateMessageState(api: api, message: message, isArchived: false)
+    }
+
+    /// Сервер (MessageStateUpdateRequest) принимает флаги is_read / is_archived / is_deleted.
     func updateMessageState(
         api: SchoolAPI,
         message: MessageDTO,
-        state: String
+        isArchived: Bool
     ) async -> Bool {
         isSaving = true
         errorMessage = nil
@@ -625,7 +607,7 @@ final class MessagesViewModel: ObservableObject {
 
         do {
             let body: [String: Any] = [
-                "state": state
+                "is_archived": isArchived
             ]
 
             _ = try await sendRequest(
@@ -635,7 +617,10 @@ final class MessagesViewModel: ObservableObject {
                 body: body
             )
 
-            successMessage = "Сообщение перемещено в архив"
+            messages.removeAll { $0.id == message.id }
+            successMessage = isArchived
+                ? "Сообщение перемещено в архив"
+                : "Сообщение возвращено из архива"
             await loadMessages(api: api, showLoading: false)
             await loadUnreadCount(api: api)
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
@@ -643,7 +628,9 @@ final class MessagesViewModel: ObservableObject {
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось переместить сообщение в архив: \(error.localizedDescription)"
+            errorMessage = isArchived
+                ? "Не удалось переместить сообщение в архив: \(error.localizedDescription)"
+                : "Не удалось вернуть сообщение из архива: \(error.localizedDescription)"
             isSaving = false
             return false
         }
@@ -661,15 +648,6 @@ final class MessagesViewModel: ObservableObject {
 
     private func saveReadAnnouncementIDs() {
         UserDefaults.standard.set(Array(readAnnouncementIDs), forKey: "read_announcement_ids")
-    }
-
-    func loadArchivedMessageIDs() {
-        let values = UserDefaults.standard.array(forKey: "archived_message_ids") as? [Int] ?? []
-        archivedMessageIDs = Set(values)
-    }
-
-    private func saveArchivedMessageIDs() {
-        UserDefaults.standard.set(Array(archivedMessageIDs), forKey: "archived_message_ids")
     }
 
     func dateTitle(_ value: String) -> String {
@@ -717,10 +695,48 @@ final class MessagesViewModel: ObservableObject {
     }
 
     func audienceTitle(_ value: String) -> String {
-        audiences.first { $0.code == value }?.title ?? value
+        switch value {
+        case "all":
+            return "Все"
+        case "role":
+            return "По роли"
+        case "class":
+            return "Класс"
+        case "class_parents":
+            return "Родители класса"
+        case "class_students":
+            return "Ученики класса"
+        case "class_teachers":
+            return "Учителя класса"
+        default:
+            return audienceOptions.first { $0.code == value }?.title ?? "Все"
+        }
+    }
+
+    func announcementAudienceTitle(_ announcement: AnnouncementDTO) -> String {
+        var title: String
+
+        if announcement.target_audience == "role" {
+            title = audienceOptions.first { $0.targetRoleCode == announcement.target_role_code }?.title
+                ?? Self.roleTitle(announcement.target_role_code ?? "")
+        } else {
+            title = audienceTitle(announcement.target_audience)
+        }
+
+        if let className = announcement.class_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !className.isEmpty,
+           announcement.target_audience.hasPrefix("class") {
+            title += " · \(className)"
+        }
+
+        return title
     }
 
     func roleTitle(_ value: String) -> String {
+        Self.roleTitle(value)
+    }
+
+    nonisolated static func roleTitle(_ value: String) -> String {
         switch value {
         case "admin":
             return "Администратор"
@@ -732,6 +748,10 @@ final class MessagesViewModel: ObservableObject {
             return "Ученик"
         case "cook":
             return "Повар"
+        case "manager":
+            return "Менеджер"
+        case "":
+            return "Пользователь"
         default:
             return value
         }
@@ -758,63 +778,14 @@ final class MessagesViewModel: ObservableObject {
         queryItems: [URLQueryItem] = [],
         body: [String: Any]? = nil
     ) async throws -> Data {
-        guard let token = api.authToken else {
-            throw MessagesError.noToken
-        }
-
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = "sc.it-status.ru"
-        components.path = path
-        components.queryItems = queryItems.isEmpty ? nil : queryItems
-
-        guard let url = components.url else {
-            throw MessagesError.badURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.applyMobileClientHeaders()
-
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-            #if DEBUG
-            print("MESSAGES REQUEST:", method, url.absoluteString)
-            print("MESSAGES BODY:", body)
-            #endif
-        } else {
-            #if DEBUG
-            print("MESSAGES REQUEST:", method, url.absoluteString)
-            #endif
-        }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw MessagesError.badResponse
-        }
-
-        let responseText = String(data: data, encoding: .utf8) ?? ""
-
-        #if DEBUG
-        print("MESSAGES RESPONSE STATUS:", httpResponse.statusCode)
-        print("MESSAGES RESPONSE BODY:", responseText)
-        #endif
-
-        if httpResponse.statusCode == 401 {
-            AuthSessionEvents.notifySessionExpired()
-            throw MessagesError.serverError(statusCode: httpResponse.statusCode, text: responseText)
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw MessagesError.serverError(statusCode: httpResponse.statusCode, text: responseText)
-        }
-
-        return data
+        try await APIRequestService.shared.request(
+            api: api,
+            path: path,
+            method: method,
+            queryItems: queryItems,
+            body: body,
+            logPrefix: "MESSAGES"
+        )
     }
 
     private static let isoFormatter: ISO8601DateFormatter = {
@@ -873,28 +844,4 @@ final class MessagesViewModel: ObservableObject {
         formatter.locale = Locale(identifier: "ru_RU")
         return formatter
     }()
-}
-
-enum MessagesError: LocalizedError {
-    case noToken
-    case badURL
-    case badResponse
-    case serverError(statusCode: Int, text: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .noToken:
-            return "Нет токена авторизации. Войдите снова."
-        case .badURL:
-            return "Некорректный URL."
-        case .badResponse:
-            return "Некорректный ответ сервера."
-        case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
-            }
-        }
-    }
 }
