@@ -16,12 +16,18 @@ final class DashboardViewModel: ObservableObject {
     @Published var calculatedGradesBySubjectID: [Int: DashboardCalculatedGrades] = [:]
     @Published var dashboardHomeworkIncompleteCount: Int?
     @Published var isLoadingStudentGrades = false
+    /// true, когда список детей получен от сервера (пусть и пустой). Только тогда
+    /// можно показывать «Связанные дети не найдены»; при ошибке — карточка с «Повторить».
+    @Published var hasLoadedStudents = false
 
     @Published var isLoading = false
     @Published var hasLoadedInitialData = false
     @Published var errorMessage: String?
 
     private var loadGeneration = UUID()
+    /// Поколение загрузок, зависящих от выбранного ребёнка (оценки, счётчик ДЗ, итоговые).
+    /// Отдельно от `loadGeneration`, чтобы выбор ребёнка не обрывал общую загрузку главной.
+    private var studentLoadGeneration = UUID()
     private var studentGradesTask: Task<Void, Never>?
     private var homeworkCountTask: Task<Void, Never>?
     private var calculatedGradesTask: Task<Void, Never>?
@@ -188,6 +194,11 @@ final class DashboardViewModel: ObservableObject {
         return String(format: "%.2f", average)
     }
 
+    /// Четверть, триместр или полугодие; nil — текущего периода нет.
+    var currentTermKind: AcademicTermKind? {
+        diaryFilters?.current_term?.termKind
+    }
+
     var currentQuarterTitle: String {
         if let currentTerm = diaryFilters?.current_term,
            currentTerm.isQuarter {
@@ -214,9 +225,6 @@ final class DashboardViewModel: ObservableObject {
 
         let generation = UUID()
         loadGeneration = generation
-        studentGradesTask?.cancel()
-        homeworkCountTask?.cancel()
-        calculatedGradesTask?.cancel()
 
         isLoading = true
         errorMessage = nil
@@ -238,31 +246,44 @@ final class DashboardViewModel: ObservableObject {
         }
 
         if isParent || isStudent {
-            async let familyTask: Void = isParent ? loadFamilyDashboard(api: api) : ()
-            async let filtersTask: Void = loadDiaryFilters(api: api)
-            async let studentsTask: Void = loadParentStudents(api: api)
+            async let familyTask: Bool = isParent ? loadFamilyDashboard(api: api) : false
+            async let filtersTask: Bool = loadDiaryFilters(api: api)
+            async let studentsTask: [DashboardStudentDTO]? = loadParentStudents(api: api)
 
-            _ = await (familyTask, filtersTask, studentsTask)
+            let (familyLoaded, filtersLoaded, loadedStudents) = await (familyTask, filtersTask, studentsTask)
 
             guard loadGeneration == generation else {
                 return
             }
 
-            if selectedStudentID == 0 {
-                selectedStudentID = parentStudents.first?.id
-                    ?? familyDashboard?.students.first?.id
-                    ?? diaryFilters?.students.first?.id
-                    ?? 0
+            let resolvedStudents = resolveStudents(
+                loadedStudents: loadedStudents,
+                familyLoaded: familyLoaded,
+                filtersLoaded: filtersLoaded
+            )
+
+            if let resolvedStudents {
+                parentStudents = resolvedStudents
+                hasLoadedStudents = true
+            } else if isParent {
+                // Список детей не пришёл ни из одного источника — это ошибка загрузки,
+                // а не «детей нет».
+                errorMessage = "Не удалось загрузить список детей. Проверьте подключение к интернету и повторите."
             }
+
+            // Выбор пользователя не трогаем, если этот ребёнок есть в списке.
+            if selectedStudentID == 0 || (hasLoadedStudents && !parentStudents.contains(where: { $0.id == selectedStudentID })) {
+                selectedStudentID = parentStudents.first?.id ?? 0
+            }
+
+            startStudentDependentLoading(api: api)
 
             hasLoadedInitialData = true
             isLoading = false
-
-            startStudentDependentLoading(
-                api: api,
-                generation: generation
-            )
         } else {
+            studentGradesTask?.cancel()
+            homeworkCountTask?.cancel()
+            calculatedGradesTask?.cancel()
             dashboardHomeworkIncompleteCount = nil
             quarterGrades = []
             calculatedGradesBySubjectID = [:]
@@ -272,31 +293,28 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func selectStudent(api: SchoolAPI, studentID: Int) async {
-        let generation = UUID()
-        loadGeneration = generation
-        studentGradesTask?.cancel()
-        homeworkCountTask?.cancel()
-        calculatedGradesTask?.cancel()
-
         selectedStudentID = studentID
         quarterGrades = []
         calculatedGradesBySubjectID = [:]
         dashboardHomeworkIncompleteCount = nil
 
-        startStudentDependentLoading(
-            api: api,
-            generation: generation
-        )
+        startStudentDependentLoading(api: api)
     }
 
-    private func startStudentDependentLoading(
-        api: SchoolAPI,
-        generation: UUID
-    ) {
+    /// Оценки и счётчик ДЗ — отдельные отменяемые задачи. Прошлые задачи отменяются,
+    /// их ответы отбрасываются по `studentLoadGeneration` и выбранному ребёнку.
+    private func startStudentDependentLoading(api: SchoolAPI) {
+        let generation = UUID()
+        studentLoadGeneration = generation
+        studentGradesTask?.cancel()
+        homeworkCountTask?.cancel()
+        calculatedGradesTask?.cancel()
+
         guard selectedStudentID != 0 else {
             quarterGrades = []
             calculatedGradesBySubjectID = [:]
             dashboardHomeworkIncompleteCount = nil
+            isLoadingStudentGrades = false
             return
         }
 
@@ -347,7 +365,8 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    func loadFamilyDashboard(api: SchoolAPI) async {
+    @discardableResult
+    func loadFamilyDashboard(api: SchoolAPI) async -> Bool {
         do {
             let data = try await sendRequest(
                 api: api,
@@ -356,17 +375,20 @@ final class DashboardViewModel: ObservableObject {
             )
 
             familyDashboard = try JSONDecoder().decode(FamilyDashboardResponseDTO.self, from: data)
+            return true
         } catch {
             if isCancellationError(error) {
                 print("DASHBOARD FAMILY LOAD CANCELLED")
-                return
+                return false
             }
 
             // Не блокируем главную, если семейный dashboard недоступен.
+            return false
         }
     }
 
-    func loadParentStudents(api: SchoolAPI) async {
+    /// Список детей из `/students`; nil — запрос не удался.
+    func loadParentStudents(api: SchoolAPI) async -> [DashboardStudentDTO]? {
         do {
             let data = try await sendRequest(
                 api: api,
@@ -375,23 +397,18 @@ final class DashboardViewModel: ObservableObject {
             )
 
             let decoded = try JSONDecoder().decode(DashboardStudentsListResponseDTO.self, from: data)
-
-            if !decoded.items.isEmpty {
-                parentStudents = decoded.items
-            } else {
-                applyStudentsFallback()
-            }
+            return decoded.items
         } catch {
             if isCancellationError(error) {
                 print("DASHBOARD STUDENTS LOAD CANCELLED")
-                return
             }
 
-            applyStudentsFallback()
+            return nil
         }
     }
 
-    func loadDiaryFilters(api: SchoolAPI) async {
+    @discardableResult
+    func loadDiaryFilters(api: SchoolAPI) async -> Bool {
         do {
             let data = try await sendRequest(
                 api: api,
@@ -401,37 +418,20 @@ final class DashboardViewModel: ObservableObject {
 
             let decoded = try JSONDecoder().decode(DiaryFiltersResponseDTO.self, from: data)
             diaryFilters = decoded
-
-            if selectedStudentID == 0,
-               let firstStudent = decoded.students.first {
-                selectedStudentID = firstStudent.id
-            }
-
-            if parentStudents.isEmpty {
-                parentStudents = decoded.students.map { student in
-                    DashboardStudentDTO(
-                        id: student.id,
-                        student_name: student.name,
-                        full_name: nil,
-                        first_name: nil,
-                        last_name: nil,
-                        middle_name: nil,
-                        class_name: nil
-                    )
-                }
-            }
+            return true
         } catch {
             if isCancellationError(error) {
                 print("DASHBOARD DIARY FILTERS LOAD CANCELLED")
-                return
+                return false
             }
 
             // Не блокируем dashboard, если фильтры дневника временно недоступны.
+            return false
         }
     }
 
     func loadQuarterGrades(api: SchoolAPI) async {
-        let generation = loadGeneration
+        let generation = studentLoadGeneration
 
         if selectedStudentID == 0,
            let firstStudent = diaryFilters?.students.first {
@@ -477,7 +477,7 @@ final class DashboardViewModel: ObservableObject {
                 queryItems: queryItems
             )
 
-            guard loadGeneration == generation else {
+            guard studentLoadGeneration == generation, selectedStudentID == studentID else {
                 return
             }
 
@@ -500,7 +500,7 @@ final class DashboardViewModel: ObservableObject {
                 return
             }
 
-            guard loadGeneration == generation else {
+            guard studentLoadGeneration == generation, selectedStudentID == studentID else {
                 return
             }
 
@@ -514,7 +514,7 @@ final class DashboardViewModel: ObservableObject {
         await loadDashboardHomeworkIncompleteCount(
             api: api,
             studentID: selectedStudentID,
-            generation: loadGeneration
+            generation: studentLoadGeneration
         )
     }
 
@@ -538,7 +538,7 @@ final class DashboardViewModel: ObservableObject {
                 ]
             )
 
-            guard loadGeneration == generation else {
+            guard studentLoadGeneration == generation, selectedStudentID == studentID else {
                 return
             }
 
@@ -553,7 +553,7 @@ final class DashboardViewModel: ObservableObject {
                 return
             }
 
-            guard loadGeneration == generation else {
+            guard studentLoadGeneration == generation, selectedStudentID == studentID else {
                 return
             }
 
@@ -627,14 +627,23 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - Private Methods
 
-    private func applyStudentsFallback() {
-        if let familyDashboard, !familyDashboard.students.isEmpty {
-            parentStudents = familyDashboard.students
-            return
+    /// Итоговый список детей: `/students`, иначе семейная главная, иначе фильтры дневника.
+    /// nil — ни один источник не ответил (ошибка загрузки, а не «детей нет»).
+    private func resolveStudents(
+        loadedStudents: [DashboardStudentDTO]?,
+        familyLoaded: Bool,
+        filtersLoaded: Bool
+    ) -> [DashboardStudentDTO]? {
+        if let loadedStudents, !loadedStudents.isEmpty {
+            return loadedStudents
         }
 
-        if let diaryFilters, !diaryFilters.students.isEmpty {
-            parentStudents = diaryFilters.students.map { student in
+        if familyLoaded, let familyDashboard, !familyDashboard.students.isEmpty {
+            return familyDashboard.students
+        }
+
+        if filtersLoaded, let diaryFilters, !diaryFilters.students.isEmpty {
+            return diaryFilters.students.map { student in
                 DashboardStudentDTO(
                     id: student.id,
                     student_name: student.name,
@@ -646,6 +655,13 @@ final class DashboardViewModel: ObservableObject {
                 )
             }
         }
+
+        // Хотя бы один источник ответил успешно — детей действительно нет.
+        if loadedStudents != nil || familyLoaded {
+            return []
+        }
+
+        return nil
     }
 
     private func valueForSummaryCard(
@@ -874,7 +890,8 @@ final class DashboardViewModel: ObservableObject {
                 }
 
                 await MainActor.run {
-                    guard self.loadGeneration == generation else {
+                    guard self.studentLoadGeneration == generation,
+                          self.selectedStudentID == studentID else {
                         return
                     }
 

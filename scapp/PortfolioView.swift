@@ -113,7 +113,8 @@ struct PortfolioView: View {
 
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Сохранить") {
-                                guard let portfolioId = viewModel.portfolio?.id else {
+                                guard let portfolio = viewModel.portfolio,
+                                      let portfolioId = portfolio.id else {
                                     return
                                 }
 
@@ -123,6 +124,7 @@ struct PortfolioView: View {
                                     await viewModel.createTeacherReview(
                                         api: appState.api,
                                         portfolioId: portfolioId,
+                                        studentId: portfolio.student_id,
                                         title: reviewTitle,
                                         body: reviewBody
                                     )

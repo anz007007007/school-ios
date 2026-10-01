@@ -16,39 +16,70 @@ final class PortfolioViewModel: ObservableObject {
     @Published var successMessage: String?
 
     private let requestService = APIRequestService.shared
+    private var portfolioLoadTask: Task<PortfolioDTO, Error>?
+    private var portfolioLoadID = 0
 
     func loadInitial(
         api: SchoolAPI,
         roleCode: String
     ) async {
+        portfolioLoadTask?.cancel()
+        portfolioLoadID += 1
+        let loadID = portfolioLoadID
+
         isLoading = true
         errorMessage = nil
         successMessage = nil
 
         do {
-            students = try await loadAvailableStudents(
+            let loadedStudents = try await loadAvailableStudents(
                 api: api,
                 roleCode: roleCode
             )
 
+            guard loadID == portfolioLoadID else {
+                return
+            }
+
+            students = loadedStudents
+
             if selectedStudent == nil || !students.contains(where: { $0.id == selectedStudent?.id }) {
                 selectedStudent = students.first
+                portfolio = nil
             }
 
             if let student = selectedStudent {
                 do {
-                    try await loadPortfolio(api: api, studentId: student.id)
+                    let loaded = try await fetchPortfolio(api: api, studentId: student.id)
+
+                    guard loadID == portfolioLoadID else {
+                        return
+                    }
+
+                    if selectedStudent?.id == student.id {
+                        portfolio = loaded
+                    }
                 } catch {
-                    try await selectFirstAccessiblePortfolio(api: api)
+                    guard loadID == portfolioLoadID, !Self.isCancellation(error) else {
+                        return
+                    }
+
+                    try await selectFirstAccessiblePortfolio(api: api, loadID: loadID)
                 }
             } else {
                 portfolio = nil
             }
         } catch {
+            guard loadID == portfolioLoadID, !Self.isCancellation(error) else {
+                return
+            }
+
             errorMessage = error.localizedDescription
         }
 
-        isLoading = false
+        if loadID == portfolioLoadID {
+            isLoading = false
+        }
     }
 
     private func loadAvailableStudents(
@@ -205,15 +236,25 @@ final class PortfolioViewModel: ObservableObject {
             .filter { !$0.student_name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
-    private func selectFirstAccessiblePortfolio(api: SchoolAPI) async throws {
+    private func selectFirstAccessiblePortfolio(api: SchoolAPI, loadID: Int) async throws {
         var lastError: Error?
 
         for student in students {
             do {
-                try await loadPortfolio(api: api, studentId: student.id)
+                let loaded = try await fetchPortfolio(api: api, studentId: student.id)
+
+                guard loadID == portfolioLoadID else {
+                    return
+                }
+
                 selectedStudent = student
+                portfolio = loaded
                 return
             } catch {
+                if Self.isCancellation(error) || loadID != portfolioLoadID {
+                    return
+                }
+
                 lastError = error
                 print("PORTFOLIO ACCESS CHECK FAILED student_id=\(student.id):", error.localizedDescription)
             }
@@ -228,30 +269,63 @@ final class PortfolioViewModel: ObservableObject {
     }
 
     func selectStudent(_ student: PortfolioStudentDTO, api: SchoolAPI) async {
+        if selectedStudent?.id != student.id {
+            // Старое портфолио не должно оставаться на экране под именем другого ребёнка.
+            portfolio = nil
+        }
+
         selectedStudent = student
         await refreshPortfolio(api: api)
     }
 
+    /// Загружает портфолио выбранного ребёнка. Прошлая загрузка отменяется,
+    /// ответ записывается только если этот ребёнок всё ещё выбран.
     func refreshPortfolio(api: SchoolAPI) async {
-        guard let selectedStudent else {
+        guard let student = selectedStudent else {
+            portfolioLoadTask?.cancel()
             portfolio = nil
             return
         }
+
+        portfolioLoadTask?.cancel()
+        portfolioLoadID += 1
+        let loadID = portfolioLoadID
 
         isLoading = true
         errorMessage = nil
         successMessage = nil
 
-        do {
-            try await loadPortfolio(api: api, studentId: selectedStudent.id)
-        } catch {
-            errorMessage = error.localizedDescription
+        let task = Task { [weak self] () throws -> PortfolioDTO in
+            guard let self else {
+                throw CancellationError()
+            }
+
+            return try await self.fetchPortfolio(api: api, studentId: student.id)
+        }
+
+        portfolioLoadTask = task
+
+        let result = await task.result
+
+        guard loadID == portfolioLoadID else {
+            return
+        }
+
+        switch result {
+        case .success(let loaded):
+            if selectedStudent?.id == student.id {
+                portfolio = loaded
+            }
+        case .failure(let error):
+            if !Self.isCancellation(error), selectedStudent?.id == student.id {
+                errorMessage = error.localizedDescription
+            }
         }
 
         isLoading = false
     }
 
-    private func loadPortfolio(api: SchoolAPI, studentId: Int) async throws {
+    private func fetchPortfolio(api: SchoolAPI, studentId: Int) async throws -> PortfolioDTO {
         let decoded = try await requestService.decode(
             PortfolioDTO.self,
             api: api,
@@ -259,7 +333,29 @@ final class PortfolioViewModel: ObservableObject {
             logPrefix: "PORTFOLIO GET"
         )
 
-        portfolio = normalized(decoded)
+        return normalized(decoded)
+    }
+
+    /// Повторно загружает портфолио ученика после сохранения/отзыва
+    /// и записывает его, только если этот ученик всё ещё выбран.
+    private func reloadPortfolioIfStillSelected(api: SchoolAPI, studentId: Int) async throws {
+        let loaded = try await fetchPortfolio(api: api, studentId: studentId)
+
+        if selectedStudent?.id == studentId {
+            portfolio = loaded
+        }
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        if let urlError = error as? URLError, urlError.code == .cancelled {
+            return true
+        }
+
+        return (error as NSError).code == NSURLErrorCancelled
     }
 
     func savePortfolio(api: SchoolAPI, portfolio draft: PortfolioDTO) async {
@@ -330,7 +426,7 @@ final class PortfolioViewModel: ObservableObject {
             )
 
             successMessage = "Портфолио сохранено"
-            try await loadPortfolio(api: api, studentId: draft.student_id)
+            try await reloadPortfolioIfStillSelected(api: api, studentId: draft.student_id)
 
             print("PORTFOLIO SAVED ID:", response.portfolio_id)
         } catch {
@@ -343,9 +439,19 @@ final class PortfolioViewModel: ObservableObject {
     func createTeacherReview(
         api: SchoolAPI,
         portfolioId: Int,
+        studentId: Int,
         title: String,
         body: String
     ) async {
+        // Отзыв можно оставить только в портфолио того ребёнка, который сейчас выбран.
+        guard selectedStudent?.id == studentId,
+              let current = portfolio,
+              current.id == portfolioId,
+              current.student_id == studentId else {
+            errorMessage = "Портфолио изменилось. Откройте нужного ученика и повторите."
+            return
+        }
+
         isSaving = true
         errorMessage = nil
         successMessage = nil
@@ -370,9 +476,7 @@ final class PortfolioViewModel: ObservableObject {
                 ? "Отзыв добавлен"
                 : "Отзыв отправлен"
 
-            if let selectedStudent {
-                try await loadPortfolio(api: api, studentId: selectedStudent.id)
-            }
+            try await reloadPortfolioIfStillSelected(api: api, studentId: studentId)
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -116,6 +116,12 @@ struct TeacherCabinetView: View {
             .onChange(of: viewModel.errorMessage) {
                 showError = viewModel.errorMessage != nil
             }
+            .onChange(of: viewModel.selectedClassID) {
+                // Список предметов всегда относится к выбранному классу.
+                Task {
+                    await viewModel.ensureJournalSubjects(api: appState.api)
+                }
+            }
             .sheet(item: $gradeDraft) { draft in
                 TeacherQuickGradeSheet(
                     draft: draft,
@@ -306,8 +312,30 @@ struct TeacherCabinetView: View {
             }
             .pickerStyle(.menu)
             .tint(AppTheme.control)
+            .onChange(of: filterClassID) {
+                guard filterClassID != 0, filterClassID != viewModel.selectedClassID else {
+                    return
+                }
+
+                // Новый класс — загружаем его предметы и журнал, чтобы в списке
+                // не остался предмет, который в этом классе не ведётся.
+                Task {
+                    await viewModel.applyJournalFilters(
+                        api: appState.api,
+                        classID: filterClassID,
+                        subjectID: filterSubjectID,
+                        date: filterDate
+                    )
+
+                    filterSubjectID = viewModel.selectedSubjectID
+                }
+            }
 
             Picker("Предмет", selection: $filterSubjectID) {
+                if viewModel.subjects.isEmpty {
+                    Text("Нет предметов в классе").tag(0)
+                }
+
                 ForEach(viewModel.subjects) { item in
                     Text(item.name).tag(item.id)
                 }
@@ -381,7 +409,13 @@ struct TeacherCabinetView: View {
             Text("\(viewModel.selectedClassName) · \(viewModel.selectedSubjectName)")
                 .foregroundStyle(.secondary)
 
-            if viewModel.filteredStudents.isEmpty {
+            if viewModel.selectedClassHasNoSubjects {
+                TeacherEmptyStateView(
+                    title: "Нет предметов в классе",
+                    subtitle: viewModel.noSubjectMessage,
+                    icon: "book.closed"
+                )
+            } else if viewModel.filteredStudents.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Ученики не найдены", systemImage: "person.3")
                         .font(.headline)
@@ -1271,6 +1305,12 @@ struct TeacherCabinetView: View {
                 ProgressView("Загружаем итоговые...")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
+            } else if viewModel.selectedClassHasNoSubjects {
+                TeacherEmptyStateView(
+                    title: "Нет предметов в классе",
+                    subtitle: viewModel.noSubjectMessage,
+                    icon: "book.closed"
+                )
             } else if viewModel.gradebook.isEmpty {
                 TeacherEmptyStateView(
                     title: "Итоговые не загружены",
@@ -1328,7 +1368,7 @@ struct TeacherCabinetView: View {
             .tint(AppTheme.control)
 
             Picker("Предмет", selection: $viewModel.selectedSubjectID) {
-                Text("Выберите предмет").tag(0)
+                Text(viewModel.selectedClassHasNoSubjects ? "Нет предметов в классе" : "Выберите предмет").tag(0)
 
                 ForEach(viewModel.subjects) { item in
                     Text(item.name).tag(item.id)

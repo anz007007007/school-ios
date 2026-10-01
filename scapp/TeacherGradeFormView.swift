@@ -186,9 +186,7 @@ struct TeacherGradeFormView: View {
                 await viewModel.loadClasses(api: appState.api)
             }
 
-            if viewModel.subjects.isEmpty {
-                await viewModel.loadSubjects(api: appState.api)
-            }
+            await viewModel.ensureJournalSubjects(api: appState.api)
 
             if viewModel.gradeTypes.isEmpty {
                 await viewModel.loadGradeTypes(api: appState.api)
@@ -207,9 +205,7 @@ struct TeacherGradeFormView: View {
             await viewModel.loadClasses(api: appState.api)
         }
 
-        if viewModel.subjects.isEmpty {
-            await viewModel.loadSubjects(api: appState.api)
-        }
+        await viewModel.ensureJournalSubjects(api: appState.api)
 
         if viewModel.gradeTypes.isEmpty {
             await viewModel.loadGradeTypes(api: appState.api)

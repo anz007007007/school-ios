@@ -16,6 +16,9 @@ final class ScheduleViewModel: ObservableObject {
     @Published var isLoadingStudents = false
     @Published var errorMessage: String?
 
+    private var scheduleLoadTask: Task<[ScheduleLessonDTO], Error>?
+    private var scheduleLoadGeneration = UUID()
+
     enum WeekdayFilter: String, CaseIterable, Identifiable {
         case monday = "Пн"
         case tuesday = "Вт"
@@ -254,12 +257,9 @@ final class ScheduleViewModel: ObservableObject {
                     seenStudentIDs.insert(student.id)
                     return true
                 }
+                // Как в дневнике и на главной — по имени, чтобы по умолчанию был выбран тот же ребёнок.
                 .sorted {
-                    if ($0.class_name ?? "") == ($1.class_name ?? "") {
-                        return $0.student_name < $1.student_name
-                    }
-
-                    return ($0.class_name ?? "") < ($1.class_name ?? "")
+                    $0.student_name.localizedCaseInsensitiveCompare($1.student_name) == .orderedAscending
                 }
 
             selectDefaultStudentIfNeeded()
@@ -282,14 +282,50 @@ final class ScheduleViewModel: ObservableObject {
 
         errorMessage = nil
 
-        do {
-            if teacherOnly {
-                try await loadTeacherSchedule(api: api)
-            } else {
-                try await loadGeneralSchedule(api: api)
+        // Прошлая загрузка отменяется; её ответ (для другого ребёнка) не применяется.
+        scheduleLoadTask?.cancel()
+        let generation = UUID()
+        scheduleLoadGeneration = generation
+
+        if !teacherOnly {
+            selectDefaultStudentIfNeeded()
+        }
+
+        let studentID = selectedStudentID
+
+        let task = Task { [weak self] () throws -> [ScheduleLessonDTO] in
+            guard let self else {
+                throw CancellationError()
             }
-        } catch {
-            errorMessage = "Не удалось загрузить расписание: \(readableScheduleError(error))"
+
+            if teacherOnly {
+                return try await self.fetchTeacherSchedule(api: api)
+            }
+
+            return try await self.fetchGeneralSchedule(api: api, studentID: studentID)
+        }
+
+        scheduleLoadTask = task
+
+        let result = await task.result
+
+        guard scheduleLoadGeneration == generation else {
+            return
+        }
+
+        switch result {
+        case .success(let loadedLessons):
+            if teacherOnly {
+                selectedStudentID = 0
+                selectedClassID = 0
+                students = []
+            }
+
+            lessons = loadedLessons
+        case .failure(let error):
+            if !Self.isCancellation(error) {
+                errorMessage = "Не удалось загрузить расписание: \(readableScheduleError(error))"
+            }
         }
 
         if showLoading {
@@ -297,13 +333,24 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
-    private func loadGeneralSchedule(api: SchoolAPI) async throws {
-        selectDefaultStudentIfNeeded()
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        if let urlError = error as? URLError, urlError.code == .cancelled {
+            return true
+        }
+
+        return (error as NSError).code == NSURLErrorCancelled
+    }
+
+    private func fetchGeneralSchedule(api: SchoolAPI, studentID: Int) async throws -> [ScheduleLessonDTO] {
 
         var queryItems: [URLQueryItem] = []
 
-        if selectedStudentID != 0 {
-            queryItems.append(URLQueryItem(name: "student_id", value: "\(selectedStudentID)"))
+        if studentID != 0 {
+            queryItems.append(URLQueryItem(name: "student_id", value: "\(studentID)"))
         }
 
         let data = try await sendRequest(
@@ -314,10 +361,10 @@ final class ScheduleViewModel: ObservableObject {
         )
 
         let decoded = try JSONDecoder().decode(ScheduleListResponseDTO.self, from: data)
-        lessons = deduplicatedLessons(decoded.items)
+        return deduplicatedLessons(decoded.items)
     }
 
-    private func loadTeacherSchedule(api: SchoolAPI) async throws {
+    private func fetchTeacherSchedule(api: SchoolAPI) async throws -> [ScheduleLessonDTO] {
         let data = try await sendRequest(
             api: api,
             path: "/api/v1/teacher/schedule",
@@ -326,11 +373,7 @@ final class ScheduleViewModel: ObservableObject {
 
         let decoded = try JSONDecoder().decode(TeacherScheduleResponseDTO.self, from: data)
 
-        selectedStudentID = 0
-        selectedClassID = 0
-        students = []
-
-        lessons = deduplicatedLessons(
+        return deduplicatedLessons(
             decoded.items.map { item in
                 ScheduleLessonDTO(
                     id: item.id,
@@ -358,7 +401,10 @@ final class ScheduleViewModel: ObservableObject {
         var result: [ScheduleLessonDTO] = []
 
         for item in items {
+            // studentId входит в ключ: у двух детей из одного класса одинаковые уроки,
+            // и без него они сливались в один.
             let key = [
+                "\(item.student_id ?? 0)",
                 "\(item.class_id)",
                 item.class_name.trimmingCharacters(in: .whitespacesAndNewlines),
                 "\(item.subject_id)",
