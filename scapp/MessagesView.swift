@@ -75,13 +75,15 @@ struct MessagesView: View {
                                 Label("Написать", systemImage: "square.and.pencil")
                             }
 
-                            if appState.canManageDocuments || appState.isAdmin || appState.isTeacher {
+                            if appState.canSendBulkMessages {
                                 Button {
                                     isShowingBulkMessage = true
                                 } label: {
                                     Label("Рассылка", systemImage: "paperplane.fill")
                                 }
+                            }
 
+                            if appState.canCreateAnnouncements {
                                 Button {
                                     isShowingAnnouncementForm = true
                                 } label: {
@@ -313,7 +315,7 @@ struct MessagesView: View {
                 }
             }
 
-            if appState.canSendMessages && (appState.isAdmin || appState.isTeacher) {
+            if appState.canCreateAnnouncements {
                 Button {
                     isShowingAnnouncementForm = true
                 } label: {

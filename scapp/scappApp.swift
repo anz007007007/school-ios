@@ -5,7 +5,6 @@ struct scappApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
     @ObservedObject private var pushService = PushNotificationService.shared
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -14,27 +13,11 @@ struct scappApp: App {
                 .environmentObject(pushService)
                 .preferredColorScheme(.light)
                 .onAppear {
+                    // Регистрация устройства на сервере — только через
+                    // AppState.registerPushNotificationsIfNeeded (после входа и при
+                    // возврате в приложение в MainTabView): он учитывает флаг push
+                    // из mobile-config и не регистрирует устройство без входа.
                     pushService.configure()
-
-                    if appState.isAuthenticated {
-                        Task {
-                            await pushService.ensurePushRegistration(api: appState.api)
-                        }
-                    }
-                }
-                .onChange(of: scenePhase) {
-                    if scenePhase == .active, appState.isAuthenticated {
-                        Task {
-                            await pushService.ensurePushRegistration(api: appState.api)
-                        }
-                    }
-                }
-                .onChange(of: appState.isAuthenticated) {
-                    if appState.isAuthenticated {
-                        Task {
-                            await pushService.ensurePushRegistration(api: appState.api)
-                        }
-                    }
                 }
         }
     }

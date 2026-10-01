@@ -752,7 +752,7 @@ struct DashboardView: View {
                         )
                     }
 
-                    if appState.isAdmin || appState.isManager || appState.isTeacher || appState.isParent || appState.isStudent {
+                    if appState.canUsePortfolio {
                         NavigationLink {
                             PortfolioView()
                         } label: {
@@ -766,7 +766,7 @@ struct DashboardView: View {
                         }
                     }
 
-                    if appState.isAdmin || appState.isManager || appState.isTeacher || appState.isParent {
+                    if appState.canViewCommunity {
                         NavigationLink {
                             CommunityView()
                         } label: {
@@ -858,6 +858,22 @@ struct DashboardView: View {
                                 systemImage: "heart.text.square.fill",
                                 color: .red,
                                 unreadCount: appState.unreadNotificationsCount(for: "health")
+                            )
+                        }
+                    }
+
+                    // Отдельной вкладки или пункта «Документы» в приложении нет —
+                    // раздел открывается только отсюда.
+                    if appState.canViewDocuments {
+                        NavigationLink {
+                            DocumentsView()
+                        } label: {
+                            FeatureCardView(
+                                title: "Документы",
+                                subtitle: appState.canManageDocuments ? "Профили, договоры и согласия" : "Справки и документы",
+                                systemImage: "doc.text.fill",
+                                color: .brown,
+                                unreadCount: appState.unreadNotificationsCount(for: "documents")
                             )
                         }
                     }

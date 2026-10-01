@@ -321,7 +321,8 @@ struct LoginView: View {
             } else {
                 security.clearSavedCredentials()
             }
-        } else {
+        } else if appState.lastLoginRejected {
+            // В счётчик блокировки — только отказ сервера, не сетевая ошибка.
             security.registerFailedAttempt()
             updateLockTimer()
         }
@@ -362,7 +363,7 @@ struct LoginView: View {
 
             if appState.isAuthenticated {
                 security.resetFailedAttempts()
-            } else {
+            } else if appState.lastLoginRejected {
                 security.registerFailedAttempt()
                 updateLockTimer()
             }
