@@ -1,96 +1,203 @@
 import SwiftUI
 
+/// Форма профиля документов (DocumentProfileSaveRequest): данные для договора и согласия.
 struct DocumentProfileFormView: View {
     @Environment(\.dismiss) private var dismiss
 
     let profile: DocumentProfileDTO?
     let students: [DocumentStudentDTO]
+    /// Родители для выбора аккаунта (admin/manager). Пусто — выбор не показывается.
+    let parents: [AdminParentDTO]
+    /// admin/manager: без parent_user_id сервер записал бы родителем сохраняющего.
+    let requiresParent: Bool
     let isSaving: Bool
     let errorMessage: String?
-    let onSave: (DocumentProfileFormData) -> Void
+    let onSave: (DocumentProfileFormData) async -> Bool
 
-    @State private var studentID: Int
-    @State private var passportSeries: String
-    @State private var passportNumber: String
-    @State private var birthCertificate: String
-    @State private var registrationAddress: String
-    @State private var residentialAddress: String
-    @State private var snils: String
-    @State private var medicalPolicy: String
-    @State private var parentFullName: String
-    @State private var parentPhone: String
-    @State private var notes: String
+    @State private var form: DocumentProfileFormData
     @State private var validationMessage: String?
 
     init(
         profile: DocumentProfileDTO?,
         students: [DocumentStudentDTO],
+        parents: [AdminParentDTO],
+        requiresParent: Bool,
         isSaving: Bool,
         errorMessage: String?,
-        onSave: @escaping (DocumentProfileFormData) -> Void
+        onSave: @escaping (DocumentProfileFormData) async -> Bool
     ) {
         self.profile = profile
         self.students = students
+        self.parents = parents
+        self.requiresParent = requiresParent
         self.isSaving = isSaving
         self.errorMessage = errorMessage
         self.onSave = onSave
 
-        _studentID = State(initialValue: profile?.student_id ?? students.first?.id ?? 0)
-        _passportSeries = State(initialValue: profile?.passport_series ?? "")
-        _passportNumber = State(initialValue: profile?.passport_number ?? "")
-        _birthCertificate = State(initialValue: profile?.birth_certificate ?? "")
-        _registrationAddress = State(initialValue: profile?.registration_address ?? "")
-        _residentialAddress = State(initialValue: profile?.residential_address ?? "")
-        _snils = State(initialValue: profile?.snils ?? "")
-        _medicalPolicy = State(initialValue: profile?.medical_policy ?? "")
-        _parentFullName = State(initialValue: profile?.parent_full_name ?? "")
-        _parentPhone = State(initialValue: profile?.parent_phone ?? "")
-        _notes = State(initialValue: profile?.notes ?? "")
+        if let profile {
+            _form = State(initialValue: DocumentProfileFormData(profile: profile))
+        } else {
+            var initial = DocumentProfileFormData(student: students.first)
+            initial.applyParent(for: initial.studentID, parents: parents)
+            _form = State(initialValue: initial)
+        }
+    }
+
+    private var isEditing: Bool {
+        profile != nil
+    }
+
+    /// Родители выбранного ученика; если связей нет — все родители.
+    private var parentChoices: [AdminParentDTO] {
+        let studentParents = parents.filter { parent in
+            parent.students.contains { $0.id == form.studentID }
+        }
+
+        return studentParents.isEmpty ? parents : studentParents
+    }
+
+    private var studentSelection: Binding<Int> {
+        Binding(
+            get: { form.studentID },
+            set: { studentID in
+                let student = students.first { $0.id == studentID }
+                let prefilled = DocumentProfileFormData(student: student)
+
+                form.studentID = studentID
+                form.studentFullName = prefilled.studentFullName
+                form.studentBirthDate = prefilled.studentBirthDate
+                form.studentGender = prefilled.studentGender
+                form.applyParent(for: studentID, parents: parents)
+                validationMessage = nil
+            }
+        )
+    }
+
+    private var parentSelection: Binding<Int> {
+        Binding(
+            get: { form.parentUserID ?? 0 },
+            set: { parentUserID in
+                form.parentUserID = parentUserID == 0 ? nil : parentUserID
+
+                if let parent = parents.first(where: { $0.user_id == parentUserID }),
+                   form.parentFullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    form.parentFullName = parent.full_name
+                }
+
+                validationMessage = nil
+            }
+        )
+    }
+
+    private var selectedParentName: String {
+        if let parent = parents.first(where: { $0.user_id == form.parentUserID }) {
+            return parent.full_name
+        }
+
+        return profile?.db_parent_name ?? profile?.displayParentName ?? "Не выбран"
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Text("ФИО ученика и родителя обязательны. Даты — в формате ДД.ММ.ГГГГ.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Ученик") {
-                    if students.isEmpty {
+                    if isEditing {
+                        LabeledContent(
+                            "Ученик",
+                            value: students.first { $0.id == form.studentID }?.displayTitle
+                                ?? profile?.displayStudentName
+                                ?? "Ученик"
+                        )
+                    } else if students.isEmpty {
                         Text("Список учеников не загружен.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("Ученик", selection: $studentID) {
+                        Picker("Ученик", selection: studentSelection) {
                             Text("Выберите ученика").tag(0)
 
                             ForEach(students) { student in
-                                Text(student.student_name).tag(student.id)
+                                Text(student.displayTitle).tag(student.id)
                             }
                         }
                     }
+
+                    TextField("ФИО ученика *", text: $form.studentFullName)
+                    TextField("Дата рождения (ДД.ММ.ГГГГ)", text: $form.studentBirthDate)
+                        .keyboardType(.numbersAndPunctuation)
+
+                    Picker("Пол", selection: $form.studentGender) {
+                        ForEach(DocumentGender.options, id: \.code) { option in
+                            Text(option.title).tag(option.code)
+                        }
+                    }
+
+                    TextField("Свидетельство о рождении", text: $form.studentBirthCertificate)
+                    TextField("Адрес регистрации ученика", text: $form.studentRegistrationAddress, axis: .vertical)
+                    TextField("Адрес проживания ученика", text: $form.studentLivingAddress, axis: .vertical)
                 }
 
-                Section("Паспорт / свидетельство") {
-                    TextField("Серия паспорта", text: $passportSeries)
-                    TextField("Номер паспорта", text: $passportNumber)
-                    TextField("Свидетельство о рождении", text: $birthCertificate)
-                }
+                Section {
+                    // Профиль привязан к паре родитель–ученик, поэтому родителя
+                    // выбираем только при создании.
+                    if isEditing {
+                        if !parents.isEmpty || profile?.db_parent_name != nil {
+                            LabeledContent("Аккаунт родителя", value: selectedParentName)
+                        }
+                    } else if requiresParent && parents.isEmpty {
+                        Text("Список родителей не загружен. Обновите экран документов.")
+                            .foregroundStyle(.secondary)
+                    } else if !parents.isEmpty {
+                        Picker("Аккаунт родителя *", selection: parentSelection) {
+                            Text("Выберите родителя").tag(0)
 
-                Section("Адреса") {
-                    TextField("Адрес регистрации", text: $registrationAddress)
-                    TextField("Адрес проживания", text: $residentialAddress)
-                }
+                            ForEach(parentChoices) { parent in
+                                Text(parent.full_name).tag(parent.user_id)
+                            }
+                        }
+                    }
 
-                Section("Документы") {
-                    TextField("СНИЛС", text: $snils)
-                    TextField("Медицинский полис", text: $medicalPolicy)
-                }
-
-                Section("Родитель / представитель") {
-                    TextField("ФИО", text: $parentFullName)
-                    TextField("Телефон", text: $parentPhone)
+                    TextField("ФИО родителя *", text: $form.parentFullName)
+                    TextField("Дата рождения (ДД.ММ.ГГГГ)", text: $form.parentBirthDate)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("Телефон", text: $form.parentPhone)
                         .keyboardType(.phonePad)
+                    TextField("Email", text: $form.parentEmail)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } header: {
+                    Text("Родитель / представитель")
                 }
 
-                Section("Заметки") {
-                    TextEditor(text: $notes)
-                        .frame(minHeight: 100)
+                Section("Паспорт родителя") {
+                    TextField("Серия", text: $form.parentPassportSeries)
+                    TextField("Номер", text: $form.parentPassportNumber)
+                    TextField("Кем выдан", text: $form.parentPassportIssuedBy, axis: .vertical)
+                    TextField("Дата выдачи (ДД.ММ.ГГГГ)", text: $form.parentPassportIssuedAt)
+                        .keyboardType(.numbersAndPunctuation)
+                    TextField("Код подразделения", text: $form.parentPassportDepartmentCode)
+                    TextField("Адрес регистрации родителя", text: $form.parentRegistrationAddress, axis: .vertical)
+                    TextField("Адрес проживания родителя", text: $form.parentLivingAddress, axis: .vertical)
+                }
+
+                Section {
+                    TextField("Название организации", text: $form.organizationName, axis: .vertical)
+                    TextField("Руководитель", text: $form.organizationDirector)
+                    TextField("Адрес организации", text: $form.organizationAddress, axis: .vertical)
+                    TextField("ИНН", text: $form.organizationInn)
+                        .keyboardType(.numberPad)
+                    TextField("ОГРН", text: $form.organizationOgrn)
+                        .keyboardType(.numberPad)
+                } header: {
+                    Text("Организация")
+                } footer: {
+                    Text("Если название организации не заполнено, сервер подставит его по умолчанию.")
                 }
 
                 if let validationMessage {
@@ -111,7 +218,8 @@ struct DocumentProfileFormView: View {
                     }
                 }
             }
-            .navigationTitle(profile == nil ? "Новый профиль" : "Профиль документов")
+            .appThemedForm()
+            .navigationTitle(isEditing ? "Профиль документов" : "Новый профиль")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -140,27 +248,25 @@ struct DocumentProfileFormView: View {
     private func save() {
         validationMessage = nil
 
-        guard studentID != 0 else {
-            validationMessage = "Выберите ученика"
+        if let error = form.validationError() {
+            validationMessage = error
             return
         }
 
-        let formData = DocumentProfileFormData(
-            profileID: profile?.id,
-            studentID: studentID,
-            passportSeries: passportSeries,
-            passportNumber: passportNumber,
-            birthCertificate: birthCertificate,
-            registrationAddress: registrationAddress,
-            residentialAddress: residentialAddress,
-            snils: snils,
-            medicalPolicy: medicalPolicy,
-            parentFullName: parentFullName,
-            parentPhone: parentPhone,
-            notes: notes
-        )
+        // Без parent_user_id сервер записал бы родителем администратора.
+        if !isEditing && (requiresParent || !parents.isEmpty) && form.parentUserID == nil {
+            validationMessage = parents.isEmpty
+                ? "Список родителей не загружен. Обновите экран и выберите родителя."
+                : "Выберите родителя"
+            return
+        }
 
-        onSave(formData)
-        dismiss()
+        let formData = form
+
+        Task {
+            if await onSave(formData) {
+                dismiss()
+            }
+        }
     }
 }

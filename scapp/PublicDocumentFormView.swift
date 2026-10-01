@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// Форма публичного документа (PublicDocumentCreateRequest / PublicDocumentUpdateRequest).
 struct PublicDocumentFormView: View {
     enum Mode {
         case create
@@ -19,37 +20,32 @@ struct PublicDocumentFormView: View {
 
     let mode: Mode
     let document: PublicDocumentDTO?
-    let documentTypes: [(code: String, title: String)]
     let isSaving: Bool
     let errorMessage: String?
-    let onSave: (PublicDocumentFormData) -> Void
+    let onSave: (PublicDocumentFormData) async -> Bool
 
     @State private var title: String
-    @State private var documentType: String
     @State private var isPublic: Bool
-    @State private var content: String
+    @State private var descriptionText: String
     @State private var fileURL: String
     @State private var validationMessage: String?
 
     init(
         mode: Mode,
         document: PublicDocumentDTO?,
-        documentTypes: [(code: String, title: String)],
         isSaving: Bool,
         errorMessage: String?,
-        onSave: @escaping (PublicDocumentFormData) -> Void
+        onSave: @escaping (PublicDocumentFormData) async -> Bool
     ) {
         self.mode = mode
         self.document = document
-        self.documentTypes = documentTypes
         self.isSaving = isSaving
         self.errorMessage = errorMessage
         self.onSave = onSave
 
         _title = State(initialValue: document?.title ?? "")
-        _documentType = State(initialValue: document?.document_type ?? documentTypes.first?.code ?? "statement")
         _isPublic = State(initialValue: document?.is_public ?? true)
-        _content = State(initialValue: document?.content ?? "")
+        _descriptionText = State(initialValue: document?.description ?? "")
         _fileURL = State(initialValue: document?.file_url ?? "")
     }
 
@@ -59,22 +55,17 @@ struct PublicDocumentFormView: View {
                 Section("Основное") {
                     TextField("Название", text: $title)
 
-                    Picker("Тип", selection: $documentType) {
-                        ForEach(documentTypes, id: \.code) { item in
-                            Text(item.title).tag(item.code)
-                        }
-                    }
-
-                    Toggle("Публичный документ", isOn: $isPublic)
+                    Toggle("Опубликован", isOn: $isPublic)
                 }
 
-                Section("Содержимое") {
-                    TextEditor(text: $content)
+                Section("Описание") {
+                    TextEditor(text: $descriptionText)
                         .frame(minHeight: 160)
                 }
 
                 Section("Файл") {
                     TextField("Ссылка на файл", text: $fileURL)
+                        .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
@@ -97,6 +88,7 @@ struct PublicDocumentFormView: View {
                     }
                 }
             }
+            .appThemedForm()
             .navigationTitle(mode.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -128,20 +120,22 @@ struct PublicDocumentFormView: View {
 
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !cleanTitle.isEmpty else {
-            validationMessage = "Введите название документа"
+        guard cleanTitle.count >= 2 else {
+            validationMessage = "Введите название документа (не короче 2 символов)"
             return
         }
 
         let formData = PublicDocumentFormData(
             title: cleanTitle,
-            documentType: documentType,
-            isPublic: isPublic,
-            content: content,
-            fileURL: fileURL
+            description: descriptionText,
+            fileURL: fileURL,
+            isPublic: isPublic
         )
 
-        onSave(formData)
-        dismiss()
+        Task {
+            if await onSave(formData) {
+                dismiss()
+            }
+        }
     }
 }

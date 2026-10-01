@@ -8,10 +8,16 @@ final class DocumentsViewModel: ObservableObject {
     @Published var profiles: [DocumentProfileDTO] = []
     @Published var generatedDocuments: [GeneratedDocumentDTO] = []
     @Published var publicDocuments: [PublicDocumentDTO] = []
+    /// Родители для выбора parent_user_id (только admin/manager).
+    @Published var parents: [AdminParentDTO] = []
 
     @Published var selectedStudentID: Int = 0
     @Published var selectedDocumentType: String = "all"
     @Published var searchText = ""
+
+    /// Профили, ученики и сгенерированные документы сервер отдаёт только
+    /// admin/manager/parent/student; остальным ролям — 403. Публичные — всем.
+    @Published private(set) var canReadProfiles = true
 
     @Published var isLoading = false
     @Published var isLoadingStudents = false
@@ -19,14 +25,7 @@ final class DocumentsViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
-    let documentTypes: [(code: String, title: String)] = [
-        ("statement", "Заявление"),
-        ("certificate", "Справка"),
-        ("contract", "Договор"),
-        ("consent", "Согласие"),
-        ("order", "Приказ"),
-        ("other", "Другое")
-    ]
+    let documentTypes = DocumentTypes.generationTypes
 
     var filteredProfiles: [DocumentProfileDTO] {
         var result = profiles
@@ -39,23 +38,16 @@ final class DocumentsViewModel: ObservableObject {
 
         if !query.isEmpty {
             result = result.filter { profile in
-                (profile.student_name ?? "").localizedCaseInsensitiveContains(query)
+                profile.displayStudentName.localizedCaseInsensitiveContains(query)
+                || profile.displayParentName.localizedCaseInsensitiveContains(query)
                 || (profile.class_name ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.passport_series ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.passport_number ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.birth_certificate ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.registration_address ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.residential_address ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.snils ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.medical_policy ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.parent_full_name ?? "").localizedCaseInsensitiveContains(query)
                 || (profile.parent_phone ?? "").localizedCaseInsensitiveContains(query)
-                || (profile.notes ?? "").localizedCaseInsensitiveContains(query)
+                || (profile.parent_email ?? "").localizedCaseInsensitiveContains(query)
             }
         }
 
         return result.sorted {
-            ($0.student_name ?? "") < ($1.student_name ?? "")
+            $0.displayStudentName < $1.displayStudentName
         }
     }
 
@@ -75,9 +67,9 @@ final class DocumentsViewModel: ObservableObject {
         if !query.isEmpty {
             result = result.filter { item in
                 item.title.localizedCaseInsensitiveContains(query)
-                || item.document_type.localizedCaseInsensitiveContains(query)
-                || (item.student_name ?? "").localizedCaseInsensitiveContains(query)
-                || (item.content ?? "").localizedCaseInsensitiveContains(query)
+                || DocumentTypes.title(item.document_type).localizedCaseInsensitiveContains(query)
+                || (item.student_full_name ?? "").localizedCaseInsensitiveContains(query)
+                || (item.parent_full_name ?? "").localizedCaseInsensitiveContains(query)
             }
         }
 
@@ -89,18 +81,13 @@ final class DocumentsViewModel: ObservableObject {
     var filteredPublicDocuments: [PublicDocumentDTO] {
         var result = publicDocuments
 
-        if selectedDocumentType != "all" {
-            result = result.filter { $0.document_type == selectedDocumentType }
-        }
-
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !query.isEmpty {
             result = result.filter { item in
                 item.title.localizedCaseInsensitiveContains(query)
-                || item.document_type.localizedCaseInsensitiveContains(query)
-                || (item.content ?? "").localizedCaseInsensitiveContains(query)
-                || (item.file_url ?? "").localizedCaseInsensitiveContains(query)
+                || (item.description ?? "").localizedCaseInsensitiveContains(query)
+                || (item.author_name ?? "").localizedCaseInsensitiveContains(query)
             }
         }
 
@@ -110,202 +97,169 @@ final class DocumentsViewModel: ObservableObject {
     }
 
     var completedProfilesCount: Int {
-        profiles.filter { profile in
-            !(profile.passport_number ?? "").isEmpty
-            || !(profile.birth_certificate ?? "").isEmpty
-            || !(profile.snils ?? "").isEmpty
-            || !(profile.medical_policy ?? "").isEmpty
-        }.count
+        profiles.filter(\.isCompleted).count
     }
 
-    func loadInitialData(api: SchoolAPI) async {
+    func loadInitialData(
+        api: SchoolAPI,
+        canReadProfiles: Bool,
+        canManageProfiles: Bool
+    ) async {
+        self.canReadProfiles = canReadProfiles
+
         isLoading = true
         errorMessage = nil
         successMessage = nil
 
         async let studentsTask: Void = loadStudents(api: api)
-        async let profilesTask: Void = loadProfiles(api: api, showLoading: false)
-        async let generatedTask: Void = loadGeneratedDocuments(api: api, showLoading: false)
-        async let publicTask: Void = loadPublicDocuments(api: api, showLoading: false)
+        async let profilesTask: Void = loadProfiles(api: api)
+        async let generatedTask: Void = loadGeneratedDocuments(api: api)
+        async let publicTask: Void = loadPublicDocuments(api: api)
+        async let parentsTask: Void = loadParents(api: api, canManageProfiles: canManageProfiles)
 
-        _ = await (studentsTask, profilesTask, generatedTask, publicTask)
+        _ = await (studentsTask, profilesTask, generatedTask, publicTask, parentsTask)
 
         isLoading = false
     }
 
     func loadStudents(api: SchoolAPI) async {
+        guard canReadProfiles else {
+            students = []
+            return
+        }
+
         isLoadingStudents = true
 
         do {
-            let data = try await sendRequest(
+            let decoded = try await APIRequestService.shared.decode(
+                DocumentStudentsListResponseDTO.self,
                 api: api,
                 path: "/api/v1/documents/students",
-                method: "GET"
+                logPrefix: "DOCUMENTS"
             )
-
-            let decoded = try JSONDecoder().decode(DocumentStudentsListResponseDTO.self, from: data)
             students = decoded.items
         } catch {
-            errorMessage = "Не удалось загрузить учеников: \(error.localizedDescription)"
+            if !Self.isForbidden(error) {
+                errorMessage = "Не удалось загрузить учеников: \(error.localizedDescription)"
+            }
         }
 
         isLoadingStudents = false
     }
 
-    func loadProfiles(
-        api: SchoolAPI,
-        showLoading: Bool = true
-    ) async {
-        if showLoading {
-            isLoading = true
+    func loadProfiles(api: SchoolAPI) async {
+        guard canReadProfiles else {
+            profiles = []
+            return
         }
 
-        errorMessage = nil
-
         do {
-            var queryItems: [URLQueryItem] = []
-
-            if selectedStudentID != 0 {
-                queryItems.append(URLQueryItem(name: "student_id", value: "\(selectedStudentID)"))
-            }
-
-            let data = try await sendRequest(
+            let decoded = try await APIRequestService.shared.decode(
+                DocumentProfilesListResponseDTO.self,
                 api: api,
                 path: "/api/v1/documents/profiles",
-                method: "GET",
-                queryItems: queryItems
+                logPrefix: "DOCUMENTS"
             )
-
-            let decoded = try JSONDecoder().decode(DocumentProfilesListResponseDTO.self, from: data)
             profiles = decoded.items
         } catch {
-            errorMessage = "Не удалось загрузить профили документов: \(error.localizedDescription)"
-        }
-
-        if showLoading {
-            isLoading = false
+            // 403 на профилях — не ошибка экрана: роль просто не видит этот раздел.
+            if Self.isForbidden(error) {
+                profiles = []
+            } else {
+                errorMessage = "Не удалось загрузить профили документов: \(error.localizedDescription)"
+            }
         }
     }
 
-    func loadGeneratedDocuments(
-        api: SchoolAPI,
-        showLoading: Bool = true
-    ) async {
-        if showLoading {
-            isLoading = true
+    func loadGeneratedDocuments(api: SchoolAPI) async {
+        guard canReadProfiles else {
+            generatedDocuments = []
+            return
         }
 
         do {
-            var queryItems: [URLQueryItem] = []
-
-            if selectedStudentID != 0 {
-                queryItems.append(URLQueryItem(name: "student_id", value: "\(selectedStudentID)"))
-            }
-
-            if selectedDocumentType != "all" {
-                queryItems.append(URLQueryItem(name: "document_type", value: selectedDocumentType))
-            }
-
-            let data = try await sendRequest(
+            let decoded = try await APIRequestService.shared.decode(
+                GeneratedDocumentsListResponseDTO.self,
                 api: api,
                 path: "/api/v1/documents/generated",
-                method: "GET",
-                queryItems: queryItems
+                logPrefix: "DOCUMENTS"
             )
-
-            let decoded = try JSONDecoder().decode(GeneratedDocumentsListResponseDTO.self, from: data)
             generatedDocuments = decoded.items
         } catch {
-            errorMessage = "Не удалось загрузить сгенерированные документы: \(error.localizedDescription)"
-        }
-
-        if showLoading {
-            isLoading = false
+            if Self.isForbidden(error) {
+                generatedDocuments = []
+            } else {
+                errorMessage = "Не удалось загрузить сгенерированные документы: \(error.localizedDescription)"
+            }
         }
     }
 
-    func loadPublicDocuments(
-        api: SchoolAPI,
-        showLoading: Bool = true
-    ) async {
-        if showLoading {
-            isLoading = true
-        }
-
+    func loadPublicDocuments(api: SchoolAPI) async {
         do {
-            var queryItems: [URLQueryItem] = []
-
-            if selectedDocumentType != "all" {
-                queryItems.append(URLQueryItem(name: "document_type", value: selectedDocumentType))
-            }
-
-            let data = try await sendRequest(
+            let decoded = try await APIRequestService.shared.decode(
+                PublicDocumentsListResponseDTO.self,
                 api: api,
                 path: "/api/v1/documents/public",
-                method: "GET",
-                queryItems: queryItems
+                logPrefix: "DOCUMENTS"
             )
-
-            let decoded = try JSONDecoder().decode(PublicDocumentsListResponseDTO.self, from: data)
             publicDocuments = decoded.items
         } catch {
             errorMessage = "Не удалось загрузить публичные документы: \(error.localizedDescription)"
         }
-
-        if showLoading {
-            isLoading = false
-        }
     }
 
-    func reloadForFilters(api: SchoolAPI) async {
-        await loadProfiles(api: api, showLoading: false)
-        await loadGeneratedDocuments(api: api, showLoading: false)
-        await loadPublicDocuments(api: api, showLoading: false)
+    /// Без списка родителей форма всё равно открывается, поэтому ошибку не показываем.
+    private func loadParents(api: SchoolAPI, canManageProfiles: Bool) async {
+        guard canManageProfiles else {
+            parents = []
+            return
+        }
+
+        do {
+            let decoded = try await APIRequestService.shared.decode(
+                AdminParentsResponseDTO.self,
+                api: api,
+                path: "/api/v1/admin/parents",
+                queryItems: [URLQueryItem(name: "is_active", value: "true")],
+                logPrefix: "DOCUMENTS PARENTS"
+            )
+            parents = decoded.items
+        } catch {
+            #if DEBUG
+            print("DOCUMENTS PARENTS ERROR:", error.localizedDescription)
+            #endif
+        }
     }
 
     func saveProfile(
         api: SchoolAPI,
         formData: DocumentProfileFormData
     ) async -> Bool {
+        if let validation = formData.validationError() {
+            errorMessage = validation
+            return false
+        }
+
         isSaving = true
         errorMessage = nil
         successMessage = nil
 
-        guard formData.studentID != 0 else {
-            errorMessage = "Выберите ученика"
-            isSaving = false
-            return false
-        }
-
         do {
-            let body: [String: Any] = [
-                "student_id": formData.studentID,
-                "passport_series": cleanOptional(formData.passportSeries) as Any,
-                "passport_number": cleanOptional(formData.passportNumber) as Any,
-                "birth_certificate": cleanOptional(formData.birthCertificate) as Any,
-                "registration_address": cleanOptional(formData.registrationAddress) as Any,
-                "residential_address": cleanOptional(formData.residentialAddress) as Any,
-                "snils": cleanOptional(formData.snils) as Any,
-                "medical_policy": cleanOptional(formData.medicalPolicy) as Any,
-                "parent_full_name": cleanOptional(formData.parentFullName) as Any,
-                "parent_phone": cleanOptional(formData.parentPhone) as Any,
-                "notes": cleanOptional(formData.notes) as Any
-            ]
-
-            _ = try await sendRequest(
+            _ = try await APIRequestService.shared.request(
                 api: api,
                 path: "/api/v1/documents/profiles",
                 method: "PUT",
-                body: body
+                body: formData.requestBody,
+                logPrefix: "DOCUMENTS"
             )
 
             successMessage = "Профиль документов сохранён"
-            await loadProfiles(api: api, showLoading: false)
+            await loadProfiles(api: api)
 
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось сохранить профиль: \(error.localizedDescription)"
+            errorMessage = "Не удалось сохранить профиль: \(Self.readableError(error))"
             isSaving = false
             return false
         }
@@ -315,47 +269,57 @@ final class DocumentsViewModel: ObservableObject {
         api: SchoolAPI,
         formData: DocumentGenerateFormData
     ) async -> Bool {
+        guard formData.profileID != 0 else {
+            errorMessage = "Выберите профиль"
+            return false
+        }
+
+        guard documentTypes.contains(where: { $0.code == formData.documentType }) else {
+            errorMessage = "Выберите тип документа"
+            return false
+        }
+
         isSaving = true
         errorMessage = nil
         successMessage = nil
 
-        guard formData.profileID != 0 else {
-            errorMessage = "Выберите профиль"
-            isSaving = false
-            return false
-        }
-
         do {
-            var body: [String: Any] = [
-                "profile_id": formData.profileID,
-                "document_type": formData.documentType
-            ]
-
-            if let titlePrefix = cleanOptional(formData.titlePrefix) {
-                body["title_prefix"] = titlePrefix
-            }
-
-            if !formData.studentIDs.isEmpty {
-                body["student_ids"] = formData.studentIDs
-            }
-
-            _ = try await sendRequest(
+            _ = try await APIRequestService.shared.request(
                 api: api,
                 path: "/api/v1/documents/generate",
                 method: "POST",
-                body: body
+                body: [
+                    "profile_id": formData.profileID,
+                    "document_type": formData.documentType
+                ],
+                logPrefix: "DOCUMENTS"
             )
 
             successMessage = "Документ сгенерирован"
-            await loadGeneratedDocuments(api: api, showLoading: false)
+            await loadGeneratedDocuments(api: api)
 
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось сгенерировать документ: \(error.localizedDescription)"
+            errorMessage = "Не удалось сгенерировать документ: \(Self.readableError(error))"
             isSaving = false
             return false
         }
+    }
+
+    /// HTML сгенерированного документа (GET /documents/generated/{id}).
+    func loadGeneratedDocumentHTML(
+        api: SchoolAPI,
+        documentID: Int
+    ) async throws -> String {
+        let data = try await APIRequestService.shared.request(
+            api: api,
+            path: "/api/v1/documents/generated/\(documentID)",
+            method: "GET",
+            logPrefix: "DOCUMENTS HTML"
+        )
+
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     func createPublicDocument(
@@ -364,76 +328,67 @@ final class DocumentsViewModel: ObservableObject {
     ) async -> Bool {
         await savePublicDocument(
             api: api,
-            documentID: nil,
+            document: nil,
             formData: formData
         )
     }
 
     func updatePublicDocument(
         api: SchoolAPI,
-        documentID: Int,
+        document: PublicDocumentDTO,
         formData: PublicDocumentFormData
     ) async -> Bool {
         await savePublicDocument(
             api: api,
-            documentID: documentID,
+            document: document,
             formData: formData
         )
     }
 
     private func savePublicDocument(
         api: SchoolAPI,
-        documentID: Int?,
+        document: PublicDocumentDTO?,
         formData: PublicDocumentFormData
     ) async -> Bool {
+        let cleanTitle = formData.title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard cleanTitle.count >= 2 else {
+            errorMessage = "Введите название документа (не короче 2 символов)"
+            return false
+        }
+
         isSaving = true
         errorMessage = nil
         successMessage = nil
 
-        let cleanTitle = formData.title.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !cleanTitle.isEmpty else {
-            errorMessage = "Введите название документа"
-            isSaving = false
-            return false
-        }
-
         do {
-            let body: [String: Any] = [
-                "title": cleanTitle,
-                "document_type": cleanOptional(formData.documentType) as Any,
-                "is_public": formData.isPublic,
-                "content": cleanOptional(formData.content) as Any,
-                "file_url": cleanOptional(formData.fileURL) as Any
-            ]
-
-            let path: String
-            let method: String
-
-            if let documentID {
-                path = "/api/v1/documents/public/\(documentID)"
-                method = "PUT"
+            if let document {
+                _ = try await APIRequestService.shared.request(
+                    api: api,
+                    path: "/api/v1/documents/public/\(document.id)",
+                    method: "PUT",
+                    body: formData.updateBody(original: document),
+                    logPrefix: "DOCUMENTS"
+                )
             } else {
-                path = "/api/v1/documents/public"
-                method = "POST"
+                _ = try await APIRequestService.shared.request(
+                    api: api,
+                    path: "/api/v1/documents/public",
+                    method: "POST",
+                    body: formData.createBody,
+                    logPrefix: "DOCUMENTS"
+                )
             }
 
-            _ = try await sendRequest(
-                api: api,
-                path: path,
-                method: method,
-                body: body
-            )
-
-            successMessage = documentID == nil ? "Публичный документ добавлен" : "Публичный документ обновлён"
-            await loadPublicDocuments(api: api, showLoading: false)
+            successMessage = document == nil ? "Публичный документ добавлен" : "Публичный документ обновлён"
+            await loadPublicDocuments(api: api)
 
             isSaving = false
             return true
         } catch {
-            errorMessage = documentID == nil
-                ? "Не удалось добавить публичный документ: \(error.localizedDescription)"
-                : "Не удалось обновить публичный документ: \(error.localizedDescription)"
+            errorMessage = document == nil
+                ? "Не удалось добавить публичный документ: \(Self.readableError(error))"
+                : "Не удалось обновить публичный документ: \(Self.readableError(error))"
             isSaving = false
             return false
         }
@@ -448,10 +403,11 @@ final class DocumentsViewModel: ObservableObject {
         successMessage = nil
 
         do {
-            _ = try await sendRequest(
+            _ = try await APIRequestService.shared.request(
                 api: api,
                 path: "/api/v1/documents/public/\(document.id)",
-                method: "DELETE"
+                method: "DELETE",
+                logPrefix: "DOCUMENTS"
             )
 
             publicDocuments.removeAll { $0.id == document.id }
@@ -459,116 +415,62 @@ final class DocumentsViewModel: ObservableObject {
             isSaving = false
             return true
         } catch {
-            errorMessage = "Не удалось удалить публичный документ: \(error.localizedDescription)"
+            errorMessage = "Не удалось удалить публичный документ: \(Self.readableError(error))"
             isSaving = false
             return false
         }
     }
 
-    func documentTypeTitle(_ value: String) -> String {
-        documentTypes.first { $0.code == value }?.title ?? value
+    func documentTypeTitle(_ value: String?) -> String {
+        DocumentTypes.title(value)
     }
 
     func studentName(for id: Int) -> String {
-        students.first { $0.id == id }?.student_name ?? "Ученик \(id)"
+        students.first { $0.id == id }?.displayName ?? "Ученик"
     }
 
     func profileForStudent(_ studentID: Int) -> DocumentProfileDTO? {
         profiles.first { $0.student_id == studentID }
     }
 
-    private func cleanOptional(_ value: String) -> String? {
-        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return clean.isEmpty ? nil : clean
+    private static func isForbidden(_ error: Error) -> Bool {
+        if case APIRequestError.serverError(let statusCode, _) = error {
+            return statusCode == 403
+        }
+
+        return false
     }
 
-    private func sendRequest(
-        api: SchoolAPI,
-        path: String,
-        method: String,
-        queryItems: [URLQueryItem] = [],
-        body: [String: Any]? = nil
-    ) async throws -> Data {
-        guard let token = api.authToken else {
-            throw DocumentsError.noToken
-        }
+    /// Переводит известные ответы сервера по документам, остальное — через APIRequestError.
+    private static func readableError(_ error: Error) -> String {
+        if case APIRequestError.serverError(_, let text) = error {
+            let lowercased = text.lowercased()
 
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = "sc.it-status.ru"
-        components.path = path
-        components.queryItems = queryItems.isEmpty ? nil : queryItems
+            if lowercased.contains("only admin or manager can manage documents") {
+                return "Управлять документами могут только администратор и менеджер."
+            }
 
-        guard let url = components.url else {
-            throw DocumentsError.badURL
-        }
+            if lowercased.contains("you can create profile only for yourself") {
+                return "Профиль можно создать только для себя."
+            }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.applyMobileClientHeaders()
+            if lowercased.contains("you do not have access to this student") {
+                return "Нет доступа к этому ученику."
+            }
 
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            if lowercased.contains("document profile not found") {
+                return "Профиль документов не найден. Обновите экран."
+            }
 
-            #if DEBUG
-            print("DOCUMENTS REQUEST:", method, url.absoluteString)
-            print("DOCUMENTS BODY:", body)
-            #endif
-        } else {
-            #if DEBUG
-            print("DOCUMENTS REQUEST:", method, url.absoluteString)
-            #endif
-        }
+            if lowercased.contains("document not found") {
+                return "Документ не найден. Обновите экран."
+            }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DocumentsError.badResponse
-        }
-
-        let responseText = String(data: data, encoding: .utf8) ?? ""
-
-        #if DEBUG
-        print("DOCUMENTS RESPONSE STATUS:", httpResponse.statusCode)
-        print("DOCUMENTS RESPONSE BODY:", responseText)
-        #endif
-
-        if httpResponse.statusCode == 401 {
-            AuthSessionEvents.notifySessionExpired()
-            throw DocumentsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw DocumentsError.serverError(statusCode: httpResponse.statusCode, text: responseText)
-        }
-
-        return data
-    }
-}
-
-enum DocumentsError: LocalizedError {
-    case noToken
-    case badURL
-    case badResponse
-    case serverError(statusCode: Int, text: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .noToken:
-            return "Нет токена авторизации. Войдите снова."
-        case .badURL:
-            return "Некорректный URL."
-        case .badResponse:
-            return "Некорректный ответ сервера."
-        case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
+            if lowercased.contains("you do not have access to document profiles") {
+                return "Нет доступа к профилям документов."
             }
         }
+
+        return error.localizedDescription
     }
 }

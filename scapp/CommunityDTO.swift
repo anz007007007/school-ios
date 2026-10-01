@@ -283,24 +283,6 @@ struct CommunityContributionRequestDTO {
     }
 }
 
-struct CommunityAdminPromosResponseDTO: Decodable {
-    let items: [CommunityAdminPromoDTO]
-
-    init(from decoder: Decoder) throws {
-        if let array = try? [CommunityAdminPromoDTO](from: decoder) {
-            items = array
-            return
-        }
-
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        items = try container.decodeIfPresent([CommunityAdminPromoDTO].self, forKey: .items) ?? []
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case items
-    }
-}
-
 struct CommunityAdminPromoDTO: Identifiable, Decodable, Hashable {
     let id: Int
     let title: String
@@ -311,6 +293,7 @@ struct CommunityAdminPromoDTO: Identifiable, Decodable, Hashable {
     let starts_at: String?
     let ends_at: String?
     let status: String
+    let published_at: String?
     let created_at: String?
     let updated_at: String?
 
@@ -325,6 +308,21 @@ struct CommunityAdminPromoDTO: Identifiable, Decodable, Hashable {
 
 struct CommunityImageUploadResponseDTO: Decodable {
     let url: String
+}
+
+enum CommunityPromoStatus {
+    static func title(_ code: String) -> String {
+        switch code {
+        case "published":
+            return "опубликовано"
+        case "draft":
+            return "черновик"
+        case "archived":
+            return "в архиве"
+        default:
+            return "неизвестен"
+        }
+    }
 }
 
 enum CommunityRole {
@@ -353,7 +351,7 @@ enum CommunityRole {
         case student:
             return "Ученики"
         default:
-            return code
+            return "Другие"
         }
     }
 }

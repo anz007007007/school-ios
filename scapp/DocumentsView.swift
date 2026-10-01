@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 struct DocumentsView: View {
     @EnvironmentObject var appState: AppState
@@ -11,16 +12,27 @@ struct DocumentsView: View {
     @State private var editingProfile: DocumentProfileDTO?
     @State private var editingPublicDocument: PublicDocumentDTO?
     @State private var publicDocumentToDelete: PublicDocumentDTO?
+    @State private var generateProfileID: Int?
 
     @State private var isShowingCreateProfile = false
     @State private var isShowingCreatePublicDocument = false
     @State private var isShowingGenerateDocument = false
     @State private var isShowingDeleteConfirmation = false
 
+    private var canReadProfiles: Bool {
+        appState.canReadDocumentProfiles
+    }
+
+    private var canManage: Bool {
+        appState.canManageDocuments
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                filtersSection
+                if canReadProfiles {
+                    filtersSection
+                }
 
                 if let successMessage = viewModel.successMessage {
                     Section {
@@ -29,37 +41,53 @@ struct DocumentsView: View {
                     }
                 }
 
-                statsSection
-                profilesSection
-                generatedDocumentsSection
+                if let errorMessage = viewModel.errorMessage,
+                   !isShowingCreateProfile,
+                   editingProfile == nil,
+                   !isShowingCreatePublicDocument,
+                   editingPublicDocument == nil,
+                   !isShowingGenerateDocument {
+                    Section {
+                        errorView(errorMessage)
+                    }
+                }
+
+                if canReadProfiles {
+                    statsSection
+                    profilesSection
+                    generatedDocumentsSection
+                }
+
                 publicDocumentsSection
             }
             .appThemedList()
             .navigationTitle("Документы")
             .searchable(text: $viewModel.searchText, prompt: "Поиск документов")
             .refreshable {
-                await viewModel.loadInitialData(api: appState.api)
+                await reload()
             }
             .task {
-                await viewModel.loadInitialData(api: appState.api)
+                await reload()
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if appState.canManageDocuments {
+                    if canManage {
                         Menu {
                             Button {
+                                viewModel.errorMessage = nil
                                 isShowingCreateProfile = true
                             } label: {
                                 Label("Профиль ученика", systemImage: "person.text.rectangle")
                             }
 
                             Button {
-                                isShowingGenerateDocument = true
+                                openGenerate(profileID: nil)
                             } label: {
                                 Label("Сгенерировать", systemImage: "doc.badge.gearshape")
                             }
 
                             Button {
+                                viewModel.errorMessage = nil
                                 isShowingCreatePublicDocument = true
                             } label: {
                                 Label("Публичный документ", systemImage: "doc.badge.plus")
@@ -71,7 +99,7 @@ struct DocumentsView: View {
 
                     Button {
                         Task {
-                            await viewModel.loadInitialData(api: appState.api)
+                            await reload()
                         }
                     } label: {
                         Image(systemName: "arrow.clockwise")
@@ -81,11 +109,12 @@ struct DocumentsView: View {
             .sheet(item: $selectedProfile) { profile in
                 DocumentProfileDetailView(
                     profile: profile,
-                    canManage: appState.canManageDocuments,
+                    canManage: canManage,
                     onEdit: {
                         selectedProfile = nil
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            viewModel.errorMessage = nil
                             editingProfile = profile
                         }
                     },
@@ -93,7 +122,7 @@ struct DocumentsView: View {
                         selectedProfile = nil
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            isShowingGenerateDocument = true
+                            openGenerate(profileID: profile.id)
                         }
                     }
                 )
@@ -101,18 +130,24 @@ struct DocumentsView: View {
             .sheet(item: $selectedGeneratedDocument) { document in
                 GeneratedDocumentDetailView(
                     document: document,
-                    documentTypeTitle: viewModel.documentTypeTitle(document.document_type)
+                    documentTypeTitle: viewModel.documentTypeTitle(document.document_type),
+                    loadHTML: {
+                        try await viewModel.loadGeneratedDocumentHTML(
+                            api: appState.api,
+                            documentID: document.id
+                        )
+                    }
                 )
             }
             .sheet(item: $selectedPublicDocument) { document in
                 PublicDocumentDetailView(
                     document: document,
-                    documentTypeTitle: viewModel.documentTypeTitle(document.document_type),
-                    canManage: appState.canManageDocuments,
+                    canManage: canManage,
                     onEdit: {
                         selectedPublicDocument = nil
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            viewModel.errorMessage = nil
                             editingPublicDocument = document
                         }
                     },
@@ -130,30 +165,15 @@ struct DocumentsView: View {
                 DocumentProfileFormView(
                     profile: nil,
                     students: viewModel.students,
+                    parents: viewModel.parents,
+                    requiresParent: canManage,
                     isSaving: viewModel.isSaving,
                     errorMessage: viewModel.errorMessage,
                     onSave: { formData in
-                        let safeFormData = DocumentProfileFormData(
-                            profileID: formData.profileID,
-                            studentID: formData.studentID,
-                            passportSeries: String(formData.passportSeries),
-                            passportNumber: String(formData.passportNumber),
-                            birthCertificate: String(formData.birthCertificate),
-                            registrationAddress: String(formData.registrationAddress),
-                            residentialAddress: String(formData.residentialAddress),
-                            snils: String(formData.snils),
-                            medicalPolicy: String(formData.medicalPolicy),
-                            parentFullName: String(formData.parentFullName),
-                            parentPhone: String(formData.parentPhone),
-                            notes: String(formData.notes)
+                        await viewModel.saveProfile(
+                            api: appState.api,
+                            formData: formData
                         )
-
-                        Task { @MainActor in
-                            _ = await viewModel.saveProfile(
-                                api: appState.api,
-                                formData: safeFormData
-                            )
-                        }
                     }
                 )
             }
@@ -161,30 +181,15 @@ struct DocumentsView: View {
                 DocumentProfileFormView(
                     profile: profile,
                     students: viewModel.students,
+                    parents: viewModel.parents,
+                    requiresParent: canManage,
                     isSaving: viewModel.isSaving,
                     errorMessage: viewModel.errorMessage,
                     onSave: { formData in
-                        let safeFormData = DocumentProfileFormData(
-                            profileID: formData.profileID,
-                            studentID: formData.studentID,
-                            passportSeries: String(formData.passportSeries),
-                            passportNumber: String(formData.passportNumber),
-                            birthCertificate: String(formData.birthCertificate),
-                            registrationAddress: String(formData.registrationAddress),
-                            residentialAddress: String(formData.residentialAddress),
-                            snils: String(formData.snils),
-                            medicalPolicy: String(formData.medicalPolicy),
-                            parentFullName: String(formData.parentFullName),
-                            parentPhone: String(formData.parentPhone),
-                            notes: String(formData.notes)
+                        await viewModel.saveProfile(
+                            api: appState.api,
+                            formData: formData
                         )
-
-                        Task { @MainActor in
-                            _ = await viewModel.saveProfile(
-                                api: appState.api,
-                                formData: safeFormData
-                            )
-                        }
                     }
                 )
             }
@@ -192,24 +197,13 @@ struct DocumentsView: View {
                 PublicDocumentFormView(
                     mode: .create,
                     document: nil,
-                    documentTypes: viewModel.documentTypes,
                     isSaving: viewModel.isSaving,
                     errorMessage: viewModel.errorMessage,
                     onSave: { formData in
-                        let safeFormData = PublicDocumentFormData(
-                            title: String(formData.title),
-                            documentType: String(formData.documentType),
-                            isPublic: formData.isPublic,
-                            content: String(formData.content),
-                            fileURL: String(formData.fileURL)
+                        await viewModel.createPublicDocument(
+                            api: appState.api,
+                            formData: formData
                         )
-
-                        Task { @MainActor in
-                            _ = await viewModel.createPublicDocument(
-                                api: appState.api,
-                                formData: safeFormData
-                            )
-                        }
                     }
                 )
             }
@@ -217,49 +211,29 @@ struct DocumentsView: View {
                 PublicDocumentFormView(
                     mode: .edit,
                     document: document,
-                    documentTypes: viewModel.documentTypes,
                     isSaving: viewModel.isSaving,
                     errorMessage: viewModel.errorMessage,
                     onSave: { formData in
-                        let safeFormData = PublicDocumentFormData(
-                            title: String(formData.title),
-                            documentType: String(formData.documentType),
-                            isPublic: formData.isPublic,
-                            content: String(formData.content),
-                            fileURL: String(formData.fileURL)
+                        await viewModel.updatePublicDocument(
+                            api: appState.api,
+                            document: document,
+                            formData: formData
                         )
-
-                        Task { @MainActor in
-                            _ = await viewModel.updatePublicDocument(
-                                api: appState.api,
-                                documentID: document.id,
-                                formData: safeFormData
-                            )
-                        }
                     }
                 )
             }
             .sheet(isPresented: $isShowingGenerateDocument) {
                 DocumentGenerateFormView(
                     profiles: viewModel.profiles,
-                    students: viewModel.students,
+                    initialProfileID: generateProfileID,
                     documentTypes: viewModel.documentTypes,
                     isSaving: viewModel.isSaving,
                     errorMessage: viewModel.errorMessage,
                     onSave: { formData in
-                        let safeFormData = DocumentGenerateFormData(
-                            profileID: formData.profileID,
-                            documentType: String(formData.documentType),
-                            titlePrefix: String(formData.titlePrefix),
-                            studentIDs: Array(formData.studentIDs)
+                        await viewModel.generateDocument(
+                            api: appState.api,
+                            formData: formData
                         )
-
-                        Task { @MainActor in
-                            _ = await viewModel.generateDocument(
-                                api: appState.api,
-                                formData: safeFormData
-                            )
-                        }
                     }
                 )
             }
@@ -294,6 +268,20 @@ struct DocumentsView: View {
         }
     }
 
+    private func reload() async {
+        await viewModel.loadInitialData(
+            api: appState.api,
+            canReadProfiles: canReadProfiles,
+            canManageProfiles: canManage
+        )
+    }
+
+    private func openGenerate(profileID: Int?) {
+        viewModel.errorMessage = nil
+        generateProfileID = profileID
+        isShowingGenerateDocument = true
+    }
+
     private var filtersSection: some View {
         Section("Фильтры") {
             if viewModel.isLoadingStudents {
@@ -309,12 +297,7 @@ struct DocumentsView: View {
                     Text("Все ученики").tag(0)
 
                     ForEach(viewModel.students) { student in
-                        Text(student.student_name).tag(student.id)
-                    }
-                }
-                .onChange(of: viewModel.selectedStudentID) {
-                    Task {
-                        await viewModel.reloadForFilters(api: appState.api)
+                        Text(student.displayTitle).tag(student.id)
                     }
                 }
             }
@@ -326,20 +309,11 @@ struct DocumentsView: View {
                     Text(item.title).tag(item.code)
                 }
             }
-            .onChange(of: viewModel.selectedDocumentType) {
-                Task {
-                    await viewModel.reloadForFilters(api: appState.api)
-                }
-            }
 
             Button {
                 viewModel.searchText = ""
                 viewModel.selectedStudentID = 0
                 viewModel.selectedDocumentType = "all"
-
-                Task {
-                    await viewModel.reloadForFilters(api: appState.api)
-                }
             } label: {
                 Label("Сбросить фильтры", systemImage: "xmark.circle")
             }
@@ -362,7 +336,7 @@ struct DocumentsView: View {
                 )
 
                 DocumentStatCard(
-                    title: "Готово",
+                    title: "Заполнено",
                     value: "\(viewModel.completedProfilesCount)",
                     color: .green,
                     systemImage: "checkmark.seal.fill"
@@ -389,12 +363,12 @@ struct DocumentsView: View {
                     Spacer()
                 }
                 .padding(.vertical)
-            } else if let errorMessage = viewModel.errorMessage {
-                errorView(errorMessage)
             } else if viewModel.filteredProfiles.isEmpty {
                 emptyView(
                     title: "Профилей нет",
-                    subtitle: "Создайте профиль документов ученика.",
+                    subtitle: canManage
+                        ? "Создайте профиль документов ученика."
+                        : "Профили документов пока не заполнены.",
                     systemImage: "person.text.rectangle"
                 )
             } else {
@@ -406,8 +380,9 @@ struct DocumentsView: View {
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if appState.canManageDocuments {
+                        if canManage {
                             Button {
+                                viewModel.errorMessage = nil
                                 editingProfile = profile
                             } label: {
                                 Label("Изменить", systemImage: "pencil")
@@ -418,8 +393,9 @@ struct DocumentsView: View {
                 }
             }
 
-            if appState.canManageDocuments {
+            if canManage {
                 Button {
+                    viewModel.errorMessage = nil
                     isShowingCreateProfile = true
                 } label: {
                     Label("Добавить профиль", systemImage: "plus")
@@ -447,9 +423,9 @@ struct DocumentsView: View {
                 }
             }
 
-            if appState.canManageDocuments {
+            if canManage {
                 Button {
-                    isShowingGenerateDocument = true
+                    openGenerate(profileID: nil)
                 } label: {
                     Label("Сгенерировать документ", systemImage: "doc.badge.gearshape")
                 }
@@ -459,7 +435,14 @@ struct DocumentsView: View {
 
     private var publicDocumentsSection: some View {
         Section("Публичные документы") {
-            if viewModel.filteredPublicDocuments.isEmpty {
+            if viewModel.isLoading && viewModel.publicDocuments.isEmpty && !canReadProfiles {
+                HStack {
+                    Spacer()
+                    ProgressView("Загрузка...")
+                    Spacer()
+                }
+                .padding(.vertical)
+            } else if viewModel.filteredPublicDocuments.isEmpty {
                 Text("Публичных документов нет")
                     .foregroundStyle(.secondary)
             } else {
@@ -467,14 +450,11 @@ struct DocumentsView: View {
                     Button {
                         selectedPublicDocument = document
                     } label: {
-                        PublicDocumentRowView(
-                            document: document,
-                            documentTypeTitle: viewModel.documentTypeTitle(document.document_type)
-                        )
+                        PublicDocumentRowView(document: document)
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if appState.canManageDocuments {
+                        if canManage {
                             Button(role: .destructive) {
                                 publicDocumentToDelete = document
                                 isShowingDeleteConfirmation = true
@@ -483,6 +463,7 @@ struct DocumentsView: View {
                             }
 
                             Button {
+                                viewModel.errorMessage = nil
                                 editingPublicDocument = document
                             } label: {
                                 Label("Изменить", systemImage: "pencil")
@@ -493,8 +474,9 @@ struct DocumentsView: View {
                 }
             }
 
-            if appState.canManageDocuments {
+            if canManage {
                 Button {
+                    viewModel.errorMessage = nil
                     isShowingCreatePublicDocument = true
                 } label: {
                     Label("Добавить публичный документ", systemImage: "plus")
@@ -515,7 +497,7 @@ struct DocumentsView: View {
 
             Button("Повторить") {
                 Task {
-                    await viewModel.loadInitialData(api: appState.api)
+                    await reload()
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -551,8 +533,17 @@ struct DocumentProfileRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(profile.student_name ?? "Ученик \(profile.student_id)")
-                .font(.headline)
+            HStack {
+                Text(profile.displayStudentName)
+                    .font(.headline)
+
+                Spacer()
+
+                if profile.isCompleted {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                }
+            }
 
             if let className = profile.class_name, !className.isEmpty {
                 Text(className)
@@ -560,21 +551,17 @@ struct DocumentProfileRowView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack {
-                if !(profile.passport_number ?? "").isEmpty {
-                    Label("Паспорт", systemImage: "person.text.rectangle")
-                }
-
-                if !(profile.birth_certificate ?? "").isEmpty {
-                    Label("Свидетельство", systemImage: "doc.text")
-                }
-
-                if !(profile.snils ?? "").isEmpty {
-                    Label("СНИЛС", systemImage: "checkmark.seal")
-                }
+            if !profile.displayParentName.isEmpty {
+                Label(profile.displayParentName, systemImage: "person.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+
+            if !profile.isCompleted {
+                Text("Не все данные для договора заполнены")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
         }
         .padding(.vertical, 4)
     }
@@ -594,7 +581,7 @@ struct GeneratedDocumentRowView: View {
                     .font(.caption)
                     .foregroundStyle(.blue)
 
-                if let studentName = document.student_name {
+                if let studentName = document.student_full_name, !studentName.isEmpty {
                     Text(studentName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -615,7 +602,6 @@ struct GeneratedDocumentRowView: View {
 
 struct PublicDocumentRowView: View {
     let document: PublicDocumentDTO
-    let documentTypeTitle: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -625,7 +611,7 @@ struct PublicDocumentRowView: View {
 
                 Spacer()
 
-                if document.is_public {
+                if document.isPublic {
                     Image(systemName: "globe")
                         .foregroundStyle(.green)
                 } else {
@@ -635,9 +621,17 @@ struct PublicDocumentRowView: View {
             }
 
             HStack {
-                Text(documentTypeTitle)
-                    .font(.caption)
-                    .foregroundStyle(.blue)
+                if let audience = DocumentTypes.roleTitle(document.target_role_code) {
+                    Text(audience)
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
+
+                if let className = document.class_name, !className.isEmpty {
+                    Text(className)
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
 
                 if let createdAt = document.created_at {
                     Text(AppDateFormatter.dateTime(createdAt))
@@ -646,8 +640,8 @@ struct PublicDocumentRowView: View {
                 }
             }
 
-            if let content = document.content, !content.isEmpty {
-                Text(content)
+            if let description = document.description, !description.isEmpty {
+                Text(description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -670,7 +664,7 @@ struct DocumentProfileDetailView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(profile.student_name ?? "Ученик \(profile.student_id)")
+                        Text(profile.displayStudentName)
                             .font(.title2)
                             .fontWeight(.bold)
 
@@ -678,36 +672,47 @@ struct DocumentProfileDetailView: View {
                             Label(className, systemImage: "person.3.fill")
                                 .foregroundStyle(.secondary)
                         }
+
+                        Text(profile.isCompleted ? "Данные для договора заполнены" : "Не все данные для договора заполнены")
+                            .font(.caption)
+                            .foregroundStyle(profile.isCompleted ? .green : .orange)
                     }
                     .padding(.vertical)
                 }
 
-                detailSection("Паспорт", values: [
-                    ("Серия", profile.passport_series),
-                    ("Номер", profile.passport_number)
-                ])
-
-                detailSection("Свидетельство", values: [
-                    ("Номер", profile.birth_certificate)
-                ])
-
-                detailSection("Адреса", values: [
-                    ("Регистрация", profile.registration_address),
-                    ("Проживание", profile.residential_address)
-                ])
-
-                detailSection("Документы", values: [
-                    ("СНИЛС", profile.snils),
-                    ("Медицинский полис", profile.medical_policy)
+                detailSection("Ученик", values: [
+                    ("ФИО", profile.student_full_name),
+                    ("Дата рождения", DocumentDate.display(profile.student_birth_date)),
+                    ("Пол", DocumentGender.title(profile.student_gender)),
+                    ("Свидетельство о рождении", profile.student_birth_certificate),
+                    ("Адрес регистрации", profile.student_registration_address),
+                    ("Адрес проживания", profile.student_living_address)
                 ])
 
                 detailSection("Родитель / представитель", values: [
                     ("ФИО", profile.parent_full_name),
-                    ("Телефон", profile.parent_phone)
+                    ("Аккаунт", profile.db_parent_name),
+                    ("Дата рождения", DocumentDate.display(profile.parent_birth_date)),
+                    ("Телефон", profile.parent_phone),
+                    ("Email", profile.parent_email)
                 ])
 
-                detailSection("Заметки", values: [
-                    ("", profile.notes)
+                detailSection("Паспорт родителя", values: [
+                    ("Серия", profile.parent_passport_series),
+                    ("Номер", profile.parent_passport_number),
+                    ("Кем выдан", profile.parent_passport_issued_by),
+                    ("Дата выдачи", DocumentDate.display(profile.parent_passport_issued_at)),
+                    ("Код подразделения", profile.parent_passport_department_code),
+                    ("Адрес регистрации", profile.parent_registration_address),
+                    ("Адрес проживания", profile.parent_living_address)
+                ])
+
+                detailSection("Организация", values: [
+                    ("Название", profile.organization_name),
+                    ("Руководитель", profile.organization_director),
+                    ("Адрес", profile.organization_address),
+                    ("ИНН", profile.organization_inn),
+                    ("ОГРН", profile.organization_ogrn)
                 ])
 
                 if canManage {
@@ -724,11 +729,6 @@ struct DocumentProfileDetailView: View {
                             Label("Сгенерировать документ", systemImage: "doc.badge.gearshape")
                         }
                     }
-                }
-
-                Section("Система") {
-                    LabeledContent("ID профиля", value: "\(profile.id)")
-                    LabeledContent("ID ученика", value: "\(profile.student_id)")
                 }
             }
             .appThemedList()
@@ -757,11 +757,7 @@ struct DocumentProfileDetailView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(Array(notEmpty.enumerated()), id: \.offset) { _, item in
-                    if item.0.isEmpty {
-                        Text(item.1 ?? "")
-                    } else {
-                        LabeledContent(item.0, value: item.1 ?? "")
-                    }
+                    LabeledContent(item.0, value: item.1 ?? "")
                 }
             }
         }
@@ -773,56 +769,72 @@ struct GeneratedDocumentDetailView: View {
 
     let document: GeneratedDocumentDTO
     let documentTypeTitle: String
+    let loadHTML: () async throws -> String
+
+    @State private var html: String?
+    @State private var loadError: String?
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(documentTypeTitle)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(documentTypeTitle)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.blue.opacity(0.12))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
+
+                    Text(document.title)
+                        .font(.headline)
+
+                    if let studentName = document.student_full_name, !studentName.isEmpty {
+                        Label(studentName, systemImage: "person.fill")
                             .font(.caption)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(.blue.opacity(0.12))
-                            .foregroundStyle(.blue)
-                            .clipShape(Capsule())
-
-                        Text(document.title)
-                            .font(.title2)
-                            .fontWeight(.bold)
-
-                        if let studentName = document.student_name {
-                            Label(studentName, systemImage: "person.fill")
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if let generatedAt = document.generated_at {
-                            Label(AppDateFormatter.dateTime(generatedAt), systemImage: "calendar")
-                                .foregroundStyle(.secondary)
-                        }
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical)
-                }
 
-                Section("Содержимое") {
-                    if let content = document.content, !content.isEmpty {
-                        Text(content)
-                            .textSelection(.enabled)
-                    } else {
-                        Text("Содержимое не загружено")
+                    if let generatedAt = document.generated_at {
+                        Label(AppDateFormatter.dateTime(generatedAt), systemImage: "calendar")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
+                .padding()
 
-                Section("Система") {
-                    LabeledContent("ID документа", value: "\(document.id)")
-                    LabeledContent("ID профиля", value: "\(document.profile_id)")
-                    LabeledContent("Тип", value: document.document_type)
+                Divider()
+
+                if let html {
+                    DocumentHTMLView(html: html)
+                } else if let loadError {
+                    VStack(spacing: 12) {
+                        Label("Не удалось открыть документ", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+
+                        Text(loadError)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Button("Повторить") {
+                            Task {
+                                await load()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ProgressView("Загрузка документа...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .appThemedList()
+            .appScreenBackground()
             .navigationTitle("Документ")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Закрыть") {
@@ -830,18 +842,61 @@ struct GeneratedDocumentDetailView: View {
                     }
                 }
             }
+            .task {
+                await load()
+            }
         }
+    }
+
+    private func load() async {
+        loadError = nil
+
+        do {
+            html = try await loadHTML()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+}
+
+/// Показ HTML сгенерированного документа (сервер отдаёт готовую страницу).
+private struct DocumentHTMLView: UIViewRepresentable {
+    let html: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        webView.loadHTMLString(html, baseURL: URL(string: "https://sc.it-status.ru"))
     }
 }
 
 struct PublicDocumentDetailView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     let document: PublicDocumentDTO
-    let documentTypeTitle: String
     let canManage: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
+
+    private var resolvedFileURL: URL? {
+        guard let value = document.file_url?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+
+        if value.hasPrefix("http://") || value.hasPrefix("https://") {
+            return URL(string: value)
+        }
+
+        let path = value.hasPrefix("/") ? value : "/\(value)"
+        return URL(string: "https://sc.it-status.ru\(path)")
+    }
 
     var body: some View {
         NavigationStack {
@@ -849,20 +904,22 @@ struct PublicDocumentDetailView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text(documentTypeTitle)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.blue.opacity(0.12))
-                                .foregroundStyle(.blue)
-                                .clipShape(Capsule())
+                            if let audience = DocumentTypes.roleTitle(document.target_role_code) {
+                                Text(audience)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(.blue.opacity(0.12))
+                                    .foregroundStyle(.blue)
+                                    .clipShape(Capsule())
+                            }
 
                             Spacer()
 
-                            Text(document.is_public ? "Публичный" : "Закрытый")
+                            Text(document.isPublic ? "Опубликован" : "Скрыт")
                                 .font(.caption)
-                                .foregroundStyle(document.is_public ? .green : .secondary)
+                                .foregroundStyle(document.isPublic ? .green : .secondary)
                         }
 
                         Text(document.title)
@@ -873,23 +930,37 @@ struct PublicDocumentDetailView: View {
                             Label(AppDateFormatter.dateTime(createdAt), systemImage: "calendar")
                                 .foregroundStyle(.secondary)
                         }
+
+                        if let author = document.author_name, !author.isEmpty {
+                            Label(author, systemImage: "person.fill")
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let className = document.class_name, !className.isEmpty {
+                            Label(className, systemImage: "person.3.fill")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.vertical)
                 }
 
-                Section("Содержимое") {
-                    if let content = document.content, !content.isEmpty {
-                        Text(content)
+                Section("Описание") {
+                    if let description = document.description, !description.isEmpty {
+                        Text(description)
                             .textSelection(.enabled)
                     } else {
-                        Text("Содержимое не указано")
+                        Text("Описание не указано")
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                if let fileURL = document.file_url, !fileURL.isEmpty {
+                if let fileURL = resolvedFileURL {
                     Section("Файл") {
-                        LabeledContent("Ссылка", value: fileURL)
+                        Button {
+                            openURL(fileURL)
+                        } label: {
+                            Label("Открыть файл", systemImage: "arrow.up.right.square")
+                        }
                     }
                 }
 
@@ -907,12 +978,6 @@ struct PublicDocumentDetailView: View {
                             Label("Удалить", systemImage: "trash")
                         }
                     }
-                }
-
-                Section("Система") {
-                    LabeledContent("ID документа", value: "\(document.id)")
-                    LabeledContent("Тип", value: document.document_type)
-                    LabeledContent("Публичный", value: document.is_public ? "Да" : "Нет")
                 }
             }
             .appThemedList()
@@ -932,36 +997,36 @@ struct DocumentGenerateFormView: View {
     @Environment(\.dismiss) private var dismiss
 
     let profiles: [DocumentProfileDTO]
-    let students: [DocumentStudentDTO]
     let documentTypes: [(code: String, title: String)]
     let isSaving: Bool
     let errorMessage: String?
-    let onSave: (DocumentGenerateFormData) -> Void
+    let onSave: (DocumentGenerateFormData) async -> Bool
 
     @State private var profileID: Int
     @State private var documentType: String
-    @State private var titlePrefix: String
-    @State private var selectedStudentIDs: Set<Int> = []
     @State private var validationMessage: String?
 
     init(
         profiles: [DocumentProfileDTO],
-        students: [DocumentStudentDTO],
+        initialProfileID: Int?,
         documentTypes: [(code: String, title: String)],
         isSaving: Bool,
         errorMessage: String?,
-        onSave: @escaping (DocumentGenerateFormData) -> Void
+        onSave: @escaping (DocumentGenerateFormData) async -> Bool
     ) {
         self.profiles = profiles
-        self.students = students
         self.documentTypes = documentTypes
         self.isSaving = isSaving
         self.errorMessage = errorMessage
         self.onSave = onSave
 
-        _profileID = State(initialValue: profiles.first?.id ?? 0)
-        _documentType = State(initialValue: documentTypes.first?.code ?? "statement")
-        _titlePrefix = State(initialValue: "")
+        _profileID = State(initialValue: initialProfileID ?? profiles.first?.id ?? 0)
+        _documentType = State(initialValue: documentTypes.first?.code ?? "contract")
+    }
+
+    private func profileTitle(_ profile: DocumentProfileDTO) -> String {
+        let parent = profile.displayParentName
+        return parent.isEmpty ? profile.displayStudentName : "\(profile.displayStudentName) · \(parent)"
     }
 
     var body: some View {
@@ -976,47 +1041,22 @@ struct DocumentGenerateFormView: View {
                             Text("Выберите профиль").tag(0)
 
                             ForEach(profiles) { profile in
-                                Text(profile.student_name ?? "Ученик \(profile.student_id)").tag(profile.id)
+                                Text(profileTitle(profile)).tag(profile.id)
                             }
                         }
                     }
                 }
 
-                Section("Документ") {
+                Section {
                     Picker("Тип", selection: $documentType) {
                         ForEach(documentTypes, id: \.code) { item in
                             Text(item.title).tag(item.code)
                         }
                     }
-
-                    TextField("Префикс названия", text: $titlePrefix)
-                }
-
-                Section {
-                    if students.isEmpty {
-                        Text("Список учеников не загружен.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        DisclosureGroup("Ученики: \(selectedStudentIDs.count)") {
-                            ForEach(students) { student in
-                                Toggle(
-                                    student.student_name,
-                                    isOn: bindingForStudent(student.id)
-                                )
-                            }
-                        }
-
-                        Button {
-                            selectedStudentIDs.removeAll()
-                        } label: {
-                            Label("Очистить выбор", systemImage: "xmark.circle")
-                        }
-                        .disabled(selectedStudentIDs.isEmpty)
-                    }
                 } header: {
-                    Text("Дополнительные ученики")
+                    Text("Документ")
                 } footer: {
-                    Text("Если никого не выбрать, документ будет создан только по выбранному профилю либо по логике сервера.")
+                    Text("Документ заполняется данными выбранного профиля.")
                 }
 
                 if let validationMessage {
@@ -1058,25 +1098,10 @@ struct DocumentGenerateFormView: View {
                             Text("Создать")
                         }
                     }
-                    .disabled(isSaving)
+                    .disabled(isSaving || profiles.isEmpty)
                 }
             }
         }
-    }
-
-    private func bindingForStudent(_ id: Int) -> Binding<Bool> {
-        Binding(
-            get: {
-                selectedStudentIDs.contains(id)
-            },
-            set: { isSelected in
-                if isSelected {
-                    selectedStudentIDs.insert(id)
-                } else {
-                    selectedStudentIDs.remove(id)
-                }
-            }
-        )
     }
 
     private func save() {
@@ -1089,13 +1114,14 @@ struct DocumentGenerateFormView: View {
 
         let formData = DocumentGenerateFormData(
             profileID: profileID,
-            documentType: documentType,
-            titlePrefix: titlePrefix,
-            studentIDs: Array(selectedStudentIDs).sorted()
+            documentType: documentType
         )
 
-        onSave(formData)
-        dismiss()
+        Task {
+            if await onSave(formData) {
+                dismiss()
+            }
+        }
     }
 }
 

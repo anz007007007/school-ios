@@ -1042,7 +1042,7 @@ struct CommunityAdminPromoRowView: View {
                     .foregroundStyle(AppTheme.muted)
                     .lineLimit(1)
 
-                Text("Статус: \(promo.status), лимит: \(promo.impressions_limit)")
+                Text("Статус: \(CommunityPromoStatus.title(promo.status)), лимит показов: \(promo.impressions_limit)")
                     .font(.caption2)
                     .foregroundStyle(AppTheme.sidebar)
             }
@@ -1288,11 +1288,11 @@ struct CommunityParentAdFormView: View {
             print("COMMUNITY FORM PICKED IMAGE FILE SIZE:", picked.fileSize)
 
             guard picked.fileSize > 0 else {
-                throw APIRequestError.networkError("Файл пустой.")
+                throw CommunityImageError.message("Файл пустой.")
             }
 
             guard picked.fileSize <= 25 * 1024 * 1024 else {
-                throw APIRequestError.networkError("Файл слишком большой. Максимум 25 МБ до сжатия.")
+                throw CommunityImageError.message("Файл слишком большой (больше 25 МБ). Выберите изображение поменьше: после сжатия оно должно быть не больше 8 МБ.")
             }
 
             let url = try await CommunityImageUploadService.uploadPickedImage(
@@ -1635,11 +1635,11 @@ struct CommunityPromoFormView: View {
             print("COMMUNITY PROMO FORM PICKED IMAGE FILE SIZE:", picked.fileSize)
 
             guard picked.fileSize > 0 else {
-                throw APIRequestError.networkError("Файл пустой.")
+                throw CommunityImageError.message("Файл пустой.")
             }
 
             guard picked.fileSize <= 25 * 1024 * 1024 else {
-                throw APIRequestError.networkError("Файл слишком большой. Максимум 25 МБ до сжатия.")
+                throw CommunityImageError.message("Файл слишком большой (больше 25 МБ). Выберите изображение поменьше: после сжатия оно должно быть не больше 8 МБ.")
             }
 
             let url = try await CommunityImageUploadService.uploadPickedImage(
@@ -1767,7 +1767,7 @@ struct CommunityNeedFormView: View {
                 Section("Статус") {
                     Picker("Статус", selection: $formData.status) {
                         Text("Активно").tag("active")
-                        Text("Скрыто").tag("hidden")
+                        Text("Выполнено").tag("completed")
                         Text("Архив").tag("archived")
                     }
                     .pickerStyle(.segmented)
@@ -1911,11 +1911,11 @@ struct CommunityNeedFormView: View {
             print("COMMUNITY NEED FORM PICKED IMAGE FILE SIZE:", picked.fileSize)
 
             guard picked.fileSize > 0 else {
-                throw APIRequestError.networkError("Файл пустой.")
+                throw CommunityImageError.message("Файл пустой.")
             }
 
             guard picked.fileSize <= 25 * 1024 * 1024 else {
-                throw APIRequestError.networkError("Файл слишком большой. Максимум 25 МБ до сжатия.")
+                throw CommunityImageError.message("Файл слишком большой (больше 25 МБ). Выберите изображение поменьше: после сжатия оно должно быть не больше 8 МБ.")
             }
 
             let url = try await CommunityImageUploadService.uploadPickedImage(
