@@ -142,7 +142,7 @@ struct ScheduleView: View {
                 }
             } label: {
                 Label(
-                    showsTableView ? "Список" : "Табличная часть",
+                    showsTableView ? "Список" : "Таблица",
                     systemImage: showsTableView ? "list.bullet" : "tablecells"
                 )
             }
@@ -252,7 +252,7 @@ struct ScheduleView: View {
 
     private var sectionTitle: String {
         if showsTableView {
-            return viewModel.selectedWeekday == .all ? "Расписание на неделю" : "Табличная часть"
+            return viewModel.selectedWeekday == .all ? "Расписание на неделю" : "Уроки"
         }
 
         return "Уроки"

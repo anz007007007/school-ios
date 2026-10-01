@@ -21,7 +21,7 @@ struct DiaryView: View {
                     }
                 }
 
-                detailsSection
+                statusSection
             }
             .appThemedList()
             .navigationTitle("Дневник")
@@ -106,7 +106,7 @@ struct DiaryView: View {
             if isFiltersExpanded {
                 Picker("Период", selection: $viewModel.selectedPeriod) {
                     ForEach(DiaryViewModel.DiaryPeriod.allCases) { period in
-                        Text(period.rawValue).tag(period)
+                        Text(viewModel.title(for: period)).tag(period)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -125,6 +125,9 @@ struct DiaryView: View {
                         }
                     }
                     .onChange(of: viewModel.selectedStudentID) {
+                        // Средние и рассчитанные итоговые прежнего ребёнка не показываем.
+                        viewModel.resetStudentDependentGrades()
+
                         Task {
                             await viewModel.reloadForFilters(api: appState.api)
                         }
@@ -151,7 +154,7 @@ struct DiaryView: View {
 
     private var filtersSummaryText: String {
         var parts: [String] = [
-            viewModel.selectedPeriod.rawValue,
+            viewModel.title(for: viewModel.selectedPeriod),
             viewModel.periodTitle
         ]
 
@@ -519,8 +522,13 @@ struct DiaryView: View {
         }
     }
 
-    private var detailsSection: some View {
-        Section("Подробно") {
+    /// Загрузка, ошибка или «оценок нет». Подробности оценки открываются нажатием на неё в таблице.
+    @ViewBuilder
+    private var statusSection: some View {
+        if (viewModel.isLoading && !viewModel.hasLoadedOnce)
+            || viewModel.errorMessage != nil
+            || viewModel.filteredGrades.isEmpty {
+        Section {
             if viewModel.isLoading && !viewModel.hasLoadedOnce {
                 HStack {
                     Spacer()
@@ -562,33 +570,9 @@ struct DiaryView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical)
-            } else {
-                ForEach(viewModel.filteredGrades) { grade in
-                    DiaryGradeRowView(
-                        grade: grade,
-                        gradeTypeTitle: viewModel.gradeTypeTitle(grade.grade_type)
-                    )
-                }
             }
         }
-    }
-
-    private func calculatedGradeInfoBadge(title: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            Text(value)
-                .font(.caption)
-                .fontWeight(.bold)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(calculatedGradeColor(value).opacity(0.14))
-                .foregroundStyle(calculatedGradeColor(value))
-                .clipShape(Capsule())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func calculatedGradeTableBadge(_ value: String) -> some View {
@@ -655,73 +639,6 @@ struct DiaryView: View {
             return .red
         default:
             return .secondary
-        }
-    }
-}
-
-struct DiaryGradeRowView: View {
-    let grade: DiaryGradeDTO
-    let gradeTypeTitle: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            gradeBadge
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(grade.subject_name)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-
-                Text(grade.student_name)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                Text("\(grade.class_name) · \(gradeTypeTitle)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(AppDateFormatter.date(grade.grade_date))
-                    .font(.caption)
-                    .foregroundStyle(.blue)
-
-                if let commentText = grade.comment, !commentText.isEmpty {
-                    Label(commentText, systemImage: "text.bubble.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                        .padding(.top, 2)
-                }
-            }
-
-            Spacer()
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var gradeBadge: some View {
-        Text(grade.grade_value)
-            .font(.title3)
-            .fontWeight(.bold)
-            .frame(width: 48, height: 48)
-            .background(gradeColor.opacity(0.15))
-            .foregroundStyle(gradeColor)
-            .clipShape(Circle())
-    }
-
-    private var gradeColor: Color {
-        guard let value = Int(grade.grade_value) else {
-            return .blue
-        }
-
-        switch value {
-        case 5:
-            return .green
-        case 4:
-            return .blue
-        case 3:
-            return .orange
-        default:
-            return .red
         }
     }
 }

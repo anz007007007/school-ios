@@ -48,8 +48,13 @@ struct DiaryAcademicTermDTO: Decodable, Identifiable, Hashable {
         AppDateFormatter.range(starts_at, ends_at)
     }
 
+    /// Четверть, триместр или полугодие — то, что сервер отдаёт текущим периодом.
+    var termKind: AcademicTermKind? {
+        AcademicTermKind.from(termType: term_type, name: name)
+    }
+
     var isQuarter: Bool {
-        term_type == "quarter"
+        termKind != nil
     }
 
     private static let dateFormatter: DateFormatter = {

@@ -50,6 +50,16 @@ final class TeacherCabinetViewModel: ObservableObject {
     @Published var successMessage: String?
     @Published var attendanceWarningMessage: String?
 
+    /// Класс, для которого загружен `subjects` (предметы учителя в этом классе).
+    private var subjectsClassID: Int = -1
+
+    /// Один активный запрос на раздел: новый запрос того же раздела отменяет прежний,
+    /// чтобы поздний ответ по старому классу/предмету не лёг под новый выбор.
+    private var sectionRequestTasks: [String: Task<Data, Error>] = [:]
+    private var homeworkLoadGeneration = UUID()
+    private var journalSubjectsTask: Task<Void, Never>?
+    private var journalSubjectsTaskClassID = 0
+
     enum HomeworkDateFilter: String, CaseIterable, Identifiable {
         case today = "Сегодня"
         case tomorrow = "Завтра"
@@ -252,7 +262,7 @@ final class TeacherCabinetViewModel: ObservableObject {
 
     var selectedSubjectName: String {
         if selectedSubjectID == 0 {
-            return "Все предметы"
+            return selectedClassHasNoSubjects ? "Нет предметов в классе" : "Все предметы"
         }
 
         return subjects.first { $0.id == selectedSubjectID }?.name ?? "Предмет"
@@ -403,19 +413,18 @@ final class TeacherCabinetViewModel: ObservableObject {
         successMessage = nil
 
         async let classesTask: Void = loadClasses(api: api)
-        async let subjectsTask: Void = loadSubjects(api: api)
         async let gradeTypesTask: Void = loadGradeTypes(api: api)
         async let scheduleTask: Void = loadSchedule(api: api)
 
-        _ = await (classesTask, subjectsTask, gradeTypesTask, scheduleTask)
+        _ = await (classesTask, gradeTypesTask, scheduleTask)
 
-        if selectedClassID == 0 {
+        if selectedClassID == 0 || !classes.contains(where: { $0.id == selectedClassID }) {
             selectedClassID = classes.first?.id ?? 0
         }
 
-        if selectedSubjectID == 0 {
-            selectedSubjectID = subjects.first?.id ?? 0
-        }
+        // Предметы — только выбранного класса: первый предмет из общего списка учителя
+        // может не вестись в этом классе, и журнал ответил бы 403.
+        await ensureJournalSubjects(api: api, force: true)
 
         if gradesSelectedClassID == 0 {
             gradesSelectedClassID = selectedClassID
@@ -432,11 +441,7 @@ final class TeacherCabinetViewModel: ObservableObject {
 
         _ = await (accessTask, studentsTask, gradesTask, termsTask)
 
-        if finalGradesSelectedTermID == 0 {
-            finalGradesSelectedTermID = terms.first(where: { $0.is_active == true })?.id
-                ?? terms.first?.id
-                ?? 0
-        }
+        finalGradesSelectedTermID = resolveCurrentTermID(keeping: finalGradesSelectedTermID)
         await loadGradebook(api: api)
 
         isLoading = false
@@ -449,12 +454,18 @@ final class TeacherCabinetViewModel: ObservableObject {
         date: Date
     ) async {
         let resolvedClassID = classID != 0 ? classID : (classes.first?.id ?? 0)
-        let resolvedSubjectID = subjectID != 0 ? subjectID : (subjects.first?.id ?? 0)
 
         selectedClassID = resolvedClassID
-        selectedSubjectID = resolvedSubjectID
         selectedStudentID = 0
         selectedJournalDate = date
+
+        await ensureJournalSubjects(api: api)
+
+        let resolvedSubjectID = subjects.contains(where: { $0.id == subjectID })
+            ? subjectID
+            : (subjects.first?.id ?? 0)
+
+        selectedSubjectID = resolvedSubjectID
 
         isLoading = true
         errorMessage = nil
@@ -511,18 +522,17 @@ final class TeacherCabinetViewModel: ObservableObject {
             await loadClasses(api: api)
         }
 
-        if subjects.isEmpty {
-            await loadSubjects(api: api)
-        }
-
         if selectedClassID == 0 {
             selectedClassID = gradesSelectedClassID != 0
                 ? gradesSelectedClassID
                 : (classes.first?.id ?? 0)
         }
 
+        await ensureJournalSubjects(api: api)
+
         if selectedSubjectID == 0 {
             selectedSubjectID = gradesSelectedSubjectID != 0
+                && subjects.contains(where: { $0.id == gradesSelectedSubjectID })
                 ? gradesSelectedSubjectID
                 : (subjects.first?.id ?? 0)
         }
@@ -537,11 +547,7 @@ final class TeacherCabinetViewModel: ObservableObject {
 
         await loadTerms(api: api)
 
-        if finalGradesSelectedTermID == 0 {
-            finalGradesSelectedTermID = terms.first(where: { $0.is_active == true })?.id
-                ?? terms.first?.id
-                ?? 0
-        }
+        finalGradesSelectedTermID = resolveCurrentTermID(keeping: finalGradesSelectedTermID)
 
         await loadGradebook(api: api)
 
@@ -558,19 +564,25 @@ final class TeacherCabinetViewModel: ObservableObject {
                 return
             }
 
-            let data = try await sendRequest(
+            let data = try await sectionRequest(
+                "access",
                 api: api,
                 path: "/api/v1/teacher/access",
-                method: "GET",
                 queryItems: [
                     URLQueryItem(name: "class_id", value: "\(classID)")
                 ]
             )
 
-            access = try JSONDecoder.teacherCabinetDecoder.decode(
+            let decoded = try JSONDecoder.teacherCabinetDecoder.decode(
                 TeacherAccessResponseDTO.self,
                 from: data
             )
+
+            guard selectedClassID == 0 || selectedClassID == classID else {
+                return
+            }
+
+            access = decoded
         } catch {
             // Не блокируем кабинет, если endpoint прав недоступен.
         }
@@ -693,16 +705,12 @@ final class TeacherCabinetViewModel: ObservableObject {
             .filter { $0.id != 0 }
             .sorted { $0.name < $1.name }
 
-            if decodedSubjects.isEmpty, !queryItems.isEmpty {
-                await loadSubjects(api: api)
-
-                homeworkSubjects = subjects
-                    .filter { $0.id != 0 }
-                    .sorted { $0.name < $1.name }
-            } else {
-                subjects = mergeSubjects(subjects, decodedSubjects)
-                homeworkSubjects = decodedSubjects
+            // Предметы журнала (`subjects`) не трогаем: они относятся к выбранному классу журнала.
+            guard (homeworkSelectedClassID != 0 ? homeworkSelectedClassID : classID) == classID else {
+                return
             }
+
+            homeworkSubjects = decodedSubjects
         } catch {
             homeworkSubjects = subjects.filter { $0.id != 0 }
 
@@ -710,23 +718,6 @@ final class TeacherCabinetViewModel: ObservableObject {
                 errorMessage = "Не удалось загрузить предметы учителя: \(readableTeacherError(error))"
             }
         }
-    }
-
-    private func mergeSubjects(
-        _ current: [TeacherSubjectDTO],
-        _ loaded: [TeacherSubjectDTO]
-    ) -> [TeacherSubjectDTO] {
-        var result = current
-        var seenIDs = Set(current.map(\.id))
-
-        for subject in loaded where !seenIDs.contains(subject.id) {
-            result.append(subject)
-            seenIDs.insert(subject.id)
-        }
-
-        return result
-            .filter { $0.id != 0 }
-            .sorted { $0.name < $1.name }
     }
 
     func loadGradeTypes(api: SchoolAPI) async {
@@ -777,17 +768,19 @@ final class TeacherCabinetViewModel: ObservableObject {
     }
 
     func loadStudents(api: SchoolAPI) async {
+        let classID = selectedClassID
+
         do {
             var queryItems: [URLQueryItem] = []
 
-            if selectedClassID != 0 {
-                queryItems.append(URLQueryItem(name: "class_id", value: "\(selectedClassID)"))
+            if classID != 0 {
+                queryItems.append(URLQueryItem(name: "class_id", value: "\(classID)"))
             }
 
-            let data = try await sendRequest(
+            let data = try await sectionRequest(
+                "students",
                 api: api,
                 path: "/api/v1/teacher/students",
-                method: "GET",
                 queryItems: queryItems
             )
 
@@ -797,12 +790,21 @@ final class TeacherCabinetViewModel: ObservableObject {
                 itemType: TeacherStudentDTO.self
             )
 
+            // Пока шёл запрос, могли выбрать другой класс — его учеников загрузит свой запрос.
+            guard selectedClassID == classID else {
+                return
+            }
+
             if decodedStudents.isEmpty {
                 await loadAdminStudentsFallback(api: api)
             } else {
                 students = decodedStudents
             }
         } catch {
+            guard !Self.isCancellation(error), selectedClassID == classID else {
+                return
+            }
+
             await loadAdminStudentsFallback(api: api)
 
             if students.isEmpty {
@@ -842,34 +844,51 @@ final class TeacherCabinetViewModel: ObservableObject {
     }
 
     func loadGrades(api: SchoolAPI) async {
+        await ensureJournalSubjects(api: api)
+
+        let classID = selectedClassID
+        let subjectID = selectedSubjectID
+        let studentID = selectedStudentID
+
         do {
             var queryItems: [URLQueryItem] = []
 
-            if selectedClassID != 0 {
-                queryItems.append(URLQueryItem(name: "class_id", value: "\(selectedClassID)"))
+            if classID != 0 {
+                queryItems.append(URLQueryItem(name: "class_id", value: "\(classID)"))
             }
 
-            if selectedSubjectID != 0 {
-                queryItems.append(URLQueryItem(name: "subject_id", value: "\(selectedSubjectID)"))
+            if subjectID != 0 {
+                queryItems.append(URLQueryItem(name: "subject_id", value: "\(subjectID)"))
             }
 
-            if selectedStudentID != 0 {
-                queryItems.append(URLQueryItem(name: "student_id", value: "\(selectedStudentID)"))
+            if studentID != 0 {
+                queryItems.append(URLQueryItem(name: "student_id", value: "\(studentID)"))
             }
 
-            let data = try await sendRequest(
+            let data = try await sectionRequest(
+                "grades",
                 api: api,
                 path: "/api/v1/teacher/grades",
-                method: "GET",
                 queryItems: queryItems
             )
 
-            grades = try decodeList(
+            let decoded = try decodeList(
                 data,
                 responseType: TeacherGradesResponseDTO.self,
                 itemType: TeacherGradeDTO.self
             )
+
+            guard isJournalSelection(classID: classID, subjectID: subjectID) else {
+                return
+            }
+
+            grades = decoded
         } catch {
+            guard !Self.isCancellation(error),
+                  isJournalSelection(classID: classID, subjectID: subjectID) else {
+                return
+            }
+
             errorMessage = "Не удалось загрузить оценки: \(error.localizedDescription)"
         }
     }
@@ -1101,23 +1120,44 @@ final class TeacherCabinetViewModel: ObservableObject {
                 queryItems.append(URLQueryItem(name: "subject_id", value: "\(homeworkSelectedSubjectID)"))
             }
 
-            let data = try await sendRequest(
+            let classID = homeworkSelectedClassID
+            let subjectID = homeworkSelectedSubjectID
+
+            let data = try await sectionRequest(
+                "access",
                 api: api,
                 path: "/api/v1/teacher/access",
-                method: "GET",
                 queryItems: queryItems
             )
 
-            access = try JSONDecoder.teacherCabinetDecoder.decode(
+            let decoded = try JSONDecoder.teacherCabinetDecoder.decode(
                 TeacherAccessResponseDTO.self,
                 from: data
             )
+
+            guard homeworkSelectedClassID == classID, homeworkSelectedSubjectID == subjectID else {
+                return
+            }
+
+            access = decoded
         } catch {
             // Не блокируем домашку, если проверка доступа недоступна.
         }
     }
 
     func loadHomework(api: SchoolAPI) async {
+        let generation = UUID()
+        homeworkLoadGeneration = generation
+        let requestedClassID = homeworkSelectedClassID
+        let requestedSubjectID = homeworkSelectedSubjectID
+
+        // Ответ записываем, только если это последний запрос и класс/предмет не сменились.
+        func isRelevant() -> Bool {
+            homeworkLoadGeneration == generation
+                && homeworkSelectedClassID == requestedClassID
+                && homeworkSelectedSubjectID == requestedSubjectID
+        }
+
         do {
             let classID = homeworkSelectedClassID != 0
                 ? homeworkSelectedClassID
@@ -1151,6 +1191,10 @@ final class TeacherCabinetViewModel: ObservableObject {
                     subjectID: homeworkSelectedSubjectID
                 )
 
+                guard isRelevant() else {
+                    return
+                }
+
                 homework = items.filter { allowedSubjectIDs.contains($0.subject_id) }
                 return
             }
@@ -1163,6 +1207,10 @@ final class TeacherCabinetViewModel: ObservableObject {
                     classID: classID,
                     subjectID: subjectID
                 )
+
+                guard isRelevant() else {
+                    return
+                }
 
                 collected.append(contentsOf: items)
             }
@@ -1180,6 +1228,10 @@ final class TeacherCabinetViewModel: ObservableObject {
                     return true
                 }
         } catch {
+            guard !Self.isCancellation(error), isRelevant() else {
+                return
+            }
+
             errorMessage = "Не удалось загрузить домашние задания: \(readableTeacherError(error))"
         }
     }
@@ -1413,14 +1465,16 @@ final class TeacherCabinetViewModel: ObservableObject {
                 return
             }
 
+            let classID = attendanceSelectedClassID
+            let dateString = attendanceDateString
             let selectedWeekday = Self.backendWeekday(from: attendanceSelectedDate)
 
-            let data = try await sendRequest(
+            let data = try await sectionRequest(
+                "attendanceLessons",
                 api: api,
                 path: "/api/v1/teacher/schedule",
-                method: "GET",
                 queryItems: [
-                    URLQueryItem(name: "class_id", value: "\(attendanceSelectedClassID)")
+                    URLQueryItem(name: "class_id", value: "\(classID)")
                 ]
             )
 
@@ -1429,6 +1483,11 @@ final class TeacherCabinetViewModel: ObservableObject {
                 responseType: TeacherScheduleResponseDTO.self,
                 itemType: TeacherScheduleLessonDTO.self
             )
+
+            // Пока шёл запрос, могли выбрать другой класс или дату.
+            guard attendanceSelectedClassID == classID, attendanceDateString == dateString else {
+                return
+            }
 
             attendanceLessons = decoded
                 .filter { lesson in
@@ -1459,6 +1518,10 @@ final class TeacherCabinetViewModel: ObservableObject {
                 attendanceWarningMessage = nil
             }
         } catch {
+            guard !Self.isCancellation(error) else {
+                return
+            }
+
             attendanceLessons = []
             attendanceSelectedLessonID = 0
             attendance = []
@@ -1499,23 +1562,39 @@ final class TeacherCabinetViewModel: ObservableObject {
                 return
             }
 
-            let data = try await sendRequest(
+            let lessonID = attendanceSelectedLessonID
+            let dateString = attendanceDateString
+
+            let data = try await sectionRequest(
+                "attendance",
                 api: api,
                 path: "/api/v1/teacher/attendance",
-                method: "GET",
                 queryItems: [
                     URLQueryItem(name: "class_id", value: "\(classID)"),
-                    URLQueryItem(name: "lesson_id", value: "\(attendanceSelectedLessonID)"),
-                    URLQueryItem(name: "attendance_date", value: attendanceDateString)
+                    URLQueryItem(name: "lesson_id", value: "\(lessonID)"),
+                    URLQueryItem(name: "attendance_date", value: dateString)
                 ]
             )
 
-            attendance = try decodeList(
+            let decoded = try decodeList(
                 data,
                 responseType: TeacherAttendanceResponseDTO.self,
                 itemType: TeacherAttendanceDTO.self
             )
+
+            // Ответ по другому классу, уроку или дате не применяем.
+            guard attendanceSelectedClassID == classID || attendanceSelectedClassID == 0,
+                  attendanceSelectedLessonID == lessonID,
+                  attendanceDateString == dateString else {
+                return
+            }
+
+            attendance = decoded
         } catch {
+            guard !Self.isCancellation(error) else {
+                return
+            }
+
             attendance = []
             attendanceWarningMessage = "Посещаемость ещё не заполнена. Можно отметить учеников и сохранить."
             print("TEACHER ATTENDANCE LOAD ERROR:", readableTeacherError(error))
@@ -1737,11 +1816,8 @@ final class TeacherCabinetViewModel: ObservableObject {
                 return ($0.academic_year ?? "") > ($1.academic_year ?? "")
             }
 
-            if finalGradesSelectedTermID == 0 {
-                finalGradesSelectedTermID = terms.first(where: { $0.is_active == true })?.id
-                    ?? terms.first?.id
-                    ?? 0
-            }
+            // Период, выбранный учителем, при обновлении не сбрасываем.
+            finalGradesSelectedTermID = resolveCurrentTermID(keeping: finalGradesSelectedTermID)
         } catch {
             errorMessage = "Не удалось загрузить периоды: \(error.localizedDescription)"
         }
@@ -1751,16 +1827,24 @@ final class TeacherCabinetViewModel: ObservableObject {
         isLoadingGradebook = true
         errorMessage = nil
 
+        if selectedClassID == 0 {
+            selectedClassID = classes.first?.id ?? 0
+        }
+
+        await ensureJournalSubjects(api: api)
+
+        let requestedClassID = selectedClassID
+        let requestedSubjectID = selectedSubjectID
+
         do {
-            let classID = selectedClassID != 0
-                ? selectedClassID
-                : (classes.first?.id ?? 0)
+            let classID = selectedClassID
 
             let subjectID = selectedSubjectID != 0
                 ? selectedSubjectID
                 : (subjects.first?.id ?? 0)
 
             guard classID != 0, subjectID != 0 else {
+                // Нет предметов в классе — экран показывает подсказку вместо ошибки.
                 gradebook = []
                 isLoadingGradebook = false
                 return
@@ -1795,22 +1879,37 @@ final class TeacherCabinetViewModel: ObservableObject {
                 queryItems.append(URLQueryItem(name: "term_id", value: "\(finalGradesSelectedTermID)"))
             }
 
-            let data = try await sendRequest(
+            let data = try await sectionRequest(
+                "gradebook",
                 api: api,
                 path: "/api/v1/teacher/gradebook",
-                method: "GET",
                 queryItems: queryItems
             )
 
-            gradebook = try decodeList(
+            let decoded = try decodeList(
                 data,
                 responseType: TeacherGradebookResponseDTO.self,
                 itemType: TeacherGradebookStudentDTO.self
             )
 
-            selectedClassID = classID
+            // Пока шёл запрос, могли выбрать другой класс/предмет — их журнал загрузит свой запрос.
+            guard isJournalSelection(classID: requestedClassID, subjectID: requestedSubjectID) else {
+                isLoadingGradebook = false
+                return
+            }
+
+            gradebook = decoded
             selectedSubjectID = subjectID
         } catch {
+            guard !Self.isCancellation(error) else {
+                return
+            }
+
+            guard isJournalSelection(classID: requestedClassID, subjectID: requestedSubjectID) else {
+                isLoadingGradebook = false
+                return
+            }
+
             errorMessage = "Не удалось загрузить журнал итоговых: \(readableTeacherError(error))"
             gradebook = []
         }
@@ -2079,6 +2178,198 @@ final class TeacherCabinetViewModel: ObservableObject {
         }
 
         return []
+    }
+
+    // MARK: - Journal selection & request helpers
+
+    /// Учитель видит все свои классы, но предметы ведёт не во всех.
+    var noSubjectMessage: String {
+        subjects.isEmpty
+            ? "В этом классе у вас нет предметов. Выберите другой класс."
+            : "Выберите предмет для загрузки журнала."
+    }
+
+    /// true, если в выбранном классе у учителя нет ни одного предмета.
+    var selectedClassHasNoSubjects: Bool {
+        selectedClassID != 0 && subjectsClassID == selectedClassID && subjects.isEmpty
+    }
+
+    private func isJournalSelection(classID: Int, subjectID: Int) -> Bool {
+        selectedClassID == classID && selectedSubjectID == subjectID
+    }
+
+    /// Загружает предметы выбранного класса, если `subjects` загружены для другого класса.
+    /// Параллельные вызовы для одного класса ждут одну и ту же загрузку.
+    func ensureJournalSubjects(api: SchoolAPI, force: Bool = false) async {
+        let classID = selectedClassID
+
+        guard classID != 0, force || subjectsClassID != classID else {
+            return
+        }
+
+        if let task = journalSubjectsTask, journalSubjectsTaskClassID == classID {
+            await task.value
+            return
+        }
+
+        let task = Task { [weak self] () -> Void in
+            guard let self else {
+                return
+            }
+
+            await self.loadJournalSubjects(api: api, classID: classID)
+        }
+
+        journalSubjectsTask = task
+        journalSubjectsTaskClassID = classID
+
+        await task.value
+
+        if journalSubjectsTaskClassID == classID {
+            journalSubjectsTask = nil
+            journalSubjectsTaskClassID = 0
+        }
+    }
+
+    /// Предметы учителя в классе (`/teacher/subjects?class_id=`). Выбранный предмет
+    /// сохраняется, если он ведётся в этом классе, иначе берётся первый.
+    private func loadJournalSubjects(api: SchoolAPI, classID: Int) async {
+        guard classID != 0 else {
+            return
+        }
+
+        do {
+            let data = try await sectionRequest(
+                "journalSubjects",
+                api: api,
+                path: "/api/v1/teacher/subjects",
+                queryItems: [
+                    URLQueryItem(name: "class_id", value: "\(classID)")
+                ]
+            )
+
+            let decoded = try decodeList(
+                data,
+                responseType: TeacherSubjectsResponseDTO.self,
+                itemType: TeacherSubjectDTO.self
+            )
+            .filter { $0.id != 0 }
+            .sorted { $0.name < $1.name }
+
+            guard selectedClassID == classID else {
+                return
+            }
+
+            subjects = decoded
+            subjectsClassID = classID
+        } catch {
+            guard !Self.isCancellation(error), selectedClassID == classID else {
+                return
+            }
+
+            // Не удалось получить предметы класса — показываем общий список учителя,
+            // сервер всё равно проверит доступ.
+            if subjects.isEmpty {
+                await loadSubjects(api: api)
+            }
+        }
+
+        if selectedSubjectID == 0 || !subjects.contains(where: { $0.id == selectedSubjectID }) {
+            selectedSubjectID = subjects.first?.id ?? 0
+        }
+
+        if gradesSelectedSubjectID != 0, !subjects.contains(where: { $0.id == gradesSelectedSubjectID }) {
+            gradesSelectedSubjectID = 0
+        }
+    }
+
+    /// Текущий период: выбранный вручную сохраняется; иначе тот, в который попадает
+    /// сегодняшняя дата (четверть/триместр/полугодие раньше учебного года).
+    private func resolveCurrentTermID(keeping currentID: Int) -> Int {
+        if currentID != 0, terms.contains(where: { $0.id == currentID }) {
+            return currentID
+        }
+
+        let today = Self.dateFormatter.string(from: Date())
+
+        func isYear(_ term: TeacherTermDTO) -> Bool {
+            (term.term_type ?? "").lowercased() == "year"
+        }
+
+        let inRange = terms.filter { term in
+            guard let from = term.starts_at?.prefix(10), let to = term.ends_at?.prefix(10),
+                  !from.isEmpty, !to.isEmpty else {
+                return false
+            }
+
+            return String(from) <= today && today <= String(to)
+        }
+
+        if let term = inRange.first(where: { !isYear($0) }) ?? inRange.first {
+            return term.id
+        }
+
+        // Сегодня вне всех периодов (каникулы) — последний начавшийся период.
+        let started = terms
+            .filter { term in
+                guard let from = term.starts_at?.prefix(10), !from.isEmpty else {
+                    return false
+                }
+
+                return String(from) <= today
+            }
+            .sorted { ($0.starts_at ?? "") > ($1.starts_at ?? "") }
+
+        if let term = started.first(where: { !isYear($0) }) ?? started.first {
+            return term.id
+        }
+
+        return terms.first?.id ?? 0
+    }
+
+    /// GET-запрос раздела: прежний запрос того же раздела отменяется.
+    private func sectionRequest(
+        _ key: String,
+        api: SchoolAPI,
+        path: String,
+        queryItems: [URLQueryItem] = []
+    ) async throws -> Data {
+        sectionRequestTasks[key]?.cancel()
+
+        let task = Task { [weak self] () throws -> Data in
+            guard let self else {
+                throw CancellationError()
+            }
+
+            return try await self.sendRequest(
+                api: api,
+                path: path,
+                method: "GET",
+                queryItems: queryItems
+            )
+        }
+
+        sectionRequestTasks[key] = task
+
+        defer {
+            if sectionRequestTasks[key] == task {
+                sectionRequestTasks[key] = nil
+            }
+        }
+
+        return try await task.value
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        if let urlError = error as? URLError, urlError.code == .cancelled {
+            return true
+        }
+
+        return (error as NSError).code == NSURLErrorCancelled
     }
 
     private func sendRequest(

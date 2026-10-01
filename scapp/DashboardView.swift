@@ -205,12 +205,15 @@ struct DashboardView: View {
     private var studentSelectorSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             if viewModel.parentStudents.isEmpty {
+                // «Детей нет» — только после успешной загрузки пустого списка;
+                // при ошибке выше показана карточка с «Повторить».
+                if let emptyText = studentsEmptyText {
                 HStack(spacing: 10) {
                     Image(systemName: "person.crop.circle.badge.questionmark")
                         .font(.subheadline)
                         .foregroundStyle(AppTheme.control)
 
-                    Text("Ребёнок: связанные дети не найдены")
+                    Text(emptyText)
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundStyle(AppTheme.text)
@@ -228,6 +231,7 @@ struct DashboardView: View {
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(AppTheme.border, lineWidth: 1)
                 )
+                }
             } else {
                 Menu {
                     ForEach(viewModel.parentStudents) { student in
@@ -294,6 +298,18 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private var studentsEmptyText: String? {
+        if viewModel.hasLoadedStudents {
+            return "Ребёнок: связанные дети не найдены"
+        }
+
+        if viewModel.isLoading {
+            return "Загружаем детей..."
+        }
+
+        return nil
+    }
+
     private var subjectAveragesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -313,7 +329,7 @@ struct DashboardView: View {
                     Spacer(minLength: 0)
                 }
 
-                Text("Текущая четверть: \(viewModel.currentQuarterTitle)")
+                Text("\(viewModel.currentTermKind?.currentTitle ?? "Текущий период"): \(viewModel.currentQuarterTitle)")
                     .font(.caption)
                     .foregroundStyle(AppTheme.muted)
                     .lineLimit(1)
@@ -325,7 +341,7 @@ struct DashboardView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical)
             } else if viewModel.subjectAverages.isEmpty {
-                Text("Оценок за текущую четверть пока нет.")
+                Text("Оценок \(viewModel.currentTermKind?.forCurrentTitle ?? "за текущий период") пока нет.")
                     .foregroundStyle(AppTheme.muted)
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)

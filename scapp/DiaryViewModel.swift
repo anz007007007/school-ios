@@ -195,6 +195,25 @@ final class DiaryViewModel: ObservableObject {
         filteredAverageSourceGrades()
     }
 
+    /// Вид текущего периода для вкладки «Четверть» (в других школах — триместр/полугодие).
+    var currentTermKind: AcademicTermKind {
+        diaryFilters?.current_term?.termKind ?? .quarter
+    }
+
+    func title(for period: DiaryPeriod) -> String {
+        period == .quarter ? currentTermKind.title : period.rawValue
+    }
+
+    /// При смене ребёнка сбрасывает средние и рассчитанные итоговые оценки,
+    /// чтобы до прихода новых не показывались данные прежнего ребёнка.
+    func resetStudentDependentGrades() {
+        calculatedGradesTask?.cancel()
+        averageGrades = []
+        calculatedGradesBySubjectID = [:]
+        isLoadingCalculatedGrades = false
+        rebuildSnapshots()
+    }
+
     var periodTitle: String {
         guard let range = selectedDateRange else {
             return "Все даты"
@@ -249,13 +268,13 @@ final class DiaryViewModel: ObservableObject {
             return (range.start, end)
 
         case .year:
-            let interval = calendar.dateInterval(of: .year, for: now)
-            guard let interval else {
-                return nil
-            }
+            // Учебный год с сервера (current_year), иначе 1 сентября — 31 августа.
+            let range = diaryFilters?.current_year?.dateRange
+                ?? AcademicPeriods.schoolYearRange(today: now, calendar: calendar)
 
-            let end = calendar.date(byAdding: .second, value: -1, to: interval.end) ?? interval.end
-            return (interval.start, end)
+            let start = calendar.startOfDay(for: range.start)
+            let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: range.end) ?? range.end
+            return (start, end)
 
         case .all:
             return nil
@@ -335,7 +354,13 @@ final class DiaryViewModel: ObservableObject {
                 selectedSubjectID = 0
             }
 
-            averageGrades = (try? await averageGradesTask) ?? []
+            let loadedAverageGrades = (try? await averageGradesTask) ?? []
+
+            guard loadGeneration == generation else {
+                return
+            }
+
+            averageGrades = loadedAverageGrades
             rebuildSnapshots()
 
             hasLoadedOnce = true

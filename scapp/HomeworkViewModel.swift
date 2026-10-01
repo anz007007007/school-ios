@@ -289,6 +289,16 @@ final class HomeworkViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
 
+        let requestStudentID = selectedStudentID
+        let requestScope = selectedScope
+        let requestSubjectID = selectedSubjectID
+
+        defer {
+            if showLoading, requestStudentID == selectedStudentID {
+                isLoading = false
+            }
+        }
+
         do {
             var queryItems: [URLQueryItem] = []
 
@@ -310,13 +320,21 @@ final class HomeworkViewModel: ObservableObject {
             )
 
             let decoded = try JSONDecoder().decode(HomeworkListResponseDTO.self, from: data)
+
+            // Ответ для другого ребёнка/фильтра (выбор сменился во время запроса) не применяем.
+            guard requestStudentID == selectedStudentID,
+                  requestScope == selectedScope,
+                  requestSubjectID == selectedSubjectID else {
+                return
+            }
+
             items = decoded.items
         } catch {
-            errorMessage = "Не удалось загрузить домашние задания: \(error.localizedDescription)"
-        }
+            guard requestStudentID == selectedStudentID else {
+                return
+            }
 
-        if showLoading {
-            isLoading = false
+            errorMessage = "Не удалось загрузить домашние задания: \(error.localizedDescription)"
         }
     }
 
@@ -548,6 +566,16 @@ final class HomeworkViewModel: ObservableObject {
                 body: body
             )
 
+            updatingCompletionIDs.remove(homework.id)
+
+            // Пока шёл запрос, могли выбрать другого ребёнка: его список не трогаем,
+            // а просто перезагружаем то, что сейчас на экране.
+            guard selectedStudentID == studentID else {
+                successMessage = isCompleted ? "Домашка отмечена выполненной" : "Отметка выполнения снята"
+                await reloadForFilters(api: api)
+                return true
+            }
+
             updateLocalCompletion(
                 homeworkID: homework.id,
                 studentID: studentID,
@@ -560,7 +588,6 @@ final class HomeworkViewModel: ObservableObject {
             )
 
             successMessage = isCompleted ? "Домашка отмечена выполненной" : "Отметка выполнения снята"
-            updatingCompletionIDs.remove(homework.id)
 
             let generation = loadGeneration
             startScopeBadgeCountsLoading(api: api, generation: generation)
