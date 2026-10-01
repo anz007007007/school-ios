@@ -21,6 +21,11 @@ final class EventsViewModel: ObservableObject {
     @Published var isSaving = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
+    /// ID события, созданного последним (из ответа POST /events).
+    @Published var lastCreatedEventID: Int?
+
+    private var participantsTask: Task<Void, Never>?
+    private var participantsRequestID = 0
 
     enum EventScope: String, CaseIterable, Identifiable {
         case upcoming = "Ближайшие"
@@ -62,30 +67,35 @@ final class EventsViewModel: ObservableObject {
         }
     }
 
+    /// Типы событий как в веб-форме бэкенда (app/templates/events.html).
     let availableEventTypes: [String] = [
-        "meeting",
-        "holiday",
-        "exam",
-        "trip",
-        "competition",
-        "sport",
-        "club",
+        "school",
         "class",
-        "other"
+        "meeting",
+        "trip",
+        "contest",
+        "sport",
+        "holiday"
     ]
 
+    /// Статусы участия, которые принимает сервер (routers/events.py).
     let participationStatuses: [(code: String, title: String)] = [
-        ("pending", "Ожидает"),
+        ("invited", "Ожидает ответа"),
         ("confirmed", "Участвует"),
+        ("maybe", "Возможно"),
         ("declined", "Не участвует"),
-        ("attended", "Был"),
-        ("absent", "Не был")
+        ("attended", "Присутствовал"),
+        ("missed", "Отсутствовал")
     ]
 
     var eventTypes: [String] {
-        let types = Set(events.map { $0.event_type })
-        let merged = Set(availableEventTypes).union(types)
-        return merged.sorted()
+        var result = availableEventTypes
+
+        for type in events.map({ $0.event_type }) where !result.contains(type) {
+            result.append(type)
+        }
+
+        return result
     }
 
     var filteredEvents: [EventTimelineDTO] {
@@ -100,7 +110,7 @@ final class EventsViewModel: ObservableObject {
         if !query.isEmpty {
             result = result.filter { event in
                 event.title.localizedCaseInsensitiveContains(query)
-                || event.event_type.localizedCaseInsensitiveContains(query)
+                || eventTypeTitle(event.event_type).localizedCaseInsensitiveContains(query)
                 || (event.description ?? "").localizedCaseInsensitiveContains(query)
                 || dateTimeTitle(event.starts_at).localizedCaseInsensitiveContains(query)
             }
@@ -346,37 +356,72 @@ final class EventsViewModel: ObservableObject {
             return false
         }
 
+        var uniqueClassIDs: [Int] = []
+        for id in formData.classIDs where !uniqueClassIDs.contains(id) {
+            uniqueClassIDs.append(id)
+        }
+
+        var uniqueStudentIDs: [Int] = []
+        for id in formData.studentIDs where !uniqueStudentIDs.contains(id) {
+            uniqueStudentIDs.append(id)
+        }
+
         do {
-            let body: [String: Any] = [
-                "title": cleanTitle,
-                "event_type": formData.eventType,
-                "starts_at": Self.apiDateFormatter.string(from: formData.startsAt),
-                "description": cleanDescription,
-                "class_ids": formData.classIDs,
-                "student_ids": formData.studentIDs
-            ]
-
-            let path: String
-            let method: String
-
             if let eventID {
-                path = "/api/v1/events/\(eventID)"
-                method = "PUT"
+                try await performUpdateEvent(
+                    api: api,
+                    eventID: eventID,
+                    title: cleanTitle,
+                    eventType: formData.eventType,
+                    startsAt: formData.startsAt,
+                    description: cleanDescription,
+                    classIDs: uniqueClassIDs,
+                    studentIDs: uniqueStudentIDs
+                )
             } else {
-                path = "/api/v1/events"
-                method = "POST"
-            }
+                // Сервер принимает одного ученика (student_id), остальных добавляем через /participants.
+                var body: [String: Any] = [
+                    "title": cleanTitle,
+                    "event_type": formData.eventType,
+                    "starts_at": Self.apiDateFormatter.string(from: formData.startsAt),
+                    "description": cleanDescription,
+                    "class_ids": uniqueClassIDs
+                ]
 
-            _ = try await sendRequest(
-                api: api,
-                path: path,
-                method: method,
-                body: body
-            )
+                if let mainStudentID = uniqueStudentIDs.first {
+                    body["student_id"] = mainStudentID
+                }
+
+                let data = try await sendRequest(
+                    api: api,
+                    path: "/api/v1/events",
+                    method: "POST",
+                    body: body
+                )
+
+                let newEventID = (try? JSONDecoder().decode(EventIdStatusResponseDTO.self, from: data))?.event_id
+
+                if let newEventID, uniqueStudentIDs.count > 1 {
+                    _ = try await sendRequest(
+                        api: api,
+                        path: "/api/v1/events/\(newEventID)/participants",
+                        method: "POST",
+                        body: [
+                            "student_ids": Array(uniqueStudentIDs.dropFirst())
+                        ]
+                    )
+                }
+
+                lastCreatedEventID = newEventID
+            }
 
             successMessage = eventID == nil ? "Событие добавлено" : "Событие обновлено"
 
             await loadEvents(api: api, showLoading: false)
+
+            if let eventID {
+                eventParticipants[eventID] = nil
+            }
 
             isSaving = false
             return true
@@ -387,6 +432,130 @@ final class EventsViewModel: ObservableObject {
             isSaving = false
             return false
         }
+    }
+
+    private func performUpdateEvent(
+        api: SchoolAPI,
+        eventID: Int,
+        title: String,
+        eventType: String,
+        startsAt: Date,
+        description: String,
+        classIDs: [Int],
+        studentIDs: [Int]
+    ) async throws {
+        let original = events.first { $0.id == eventID }
+        let originalClassIDs = original?.formClassIDs(classes: filterClasses) ?? []
+        let participantsBefore = (try? await fetchEventParticipants(api: api, eventID: eventID))
+            ?? eventParticipants[eventID]
+        let originalStudentIDs = original?.formStudentIDs(
+            participants: participantsBefore,
+            classes: filterClasses
+        ) ?? []
+
+        // Если классы не менялись, class_ids не отправляем: иначе сервер пересоберёт участников.
+        let classesChanged = original == nil || Set(classIDs) != Set(originalClassIDs)
+        let studentsChanged = original == nil || Set(studentIDs) != Set(originalStudentIDs)
+        let mainStudentID = studentIDs.first
+
+        var body: [String: Any] = [
+            "title": title,
+            "event_type": eventType,
+            "starts_at": Self.apiDateFormatter.string(from: startsAt),
+            "description": description
+        ]
+
+        if classesChanged {
+            body["class_ids"] = classIDs
+        }
+
+        if studentsChanged || classesChanged {
+            if let mainStudentID {
+                body["student_id"] = mainStudentID
+            } else if original?.student_id != nil {
+                body["clear_student_id"] = true
+            }
+        }
+
+        _ = try await sendRequest(
+            api: api,
+            path: "/api/v1/events/\(eventID)",
+            method: "PUT",
+            body: body
+        )
+
+        if classesChanged {
+            // Сервер оставил основного ученика и заново добавил классы — вернём остальных выбранных.
+            if studentIDs.count > 1 {
+                _ = try await sendRequest(
+                    api: api,
+                    path: "/api/v1/events/\(eventID)/participants",
+                    method: "POST",
+                    body: [
+                        "student_ids": Array(studentIDs.dropFirst())
+                    ]
+                )
+            }
+        } else if studentsChanged {
+            let addedStudentIDs = studentIDs.filter { !originalStudentIDs.contains($0) }
+
+            if !addedStudentIDs.isEmpty {
+                _ = try await sendRequest(
+                    api: api,
+                    path: "/api/v1/events/\(eventID)/participants",
+                    method: "POST",
+                    body: [
+                        "student_ids": addedStudentIDs
+                    ]
+                )
+            }
+
+            // Убранных из формы удаляем, если они не участвуют через выбранный класс.
+            var classIDByStudent: [Int: Int] = [:]
+            for participant in participantsBefore ?? [] {
+                if let classID = participant.class_id {
+                    classIDByStudent[participant.student_id] = classID
+                }
+            }
+
+            let removedStudentIDs = originalStudentIDs.filter { studentID in
+                guard !studentIDs.contains(studentID) else {
+                    return false
+                }
+
+                guard let classID = classIDByStudent[studentID] else {
+                    return true
+                }
+
+                return !classIDs.contains(classID)
+            }
+
+            for studentID in removedStudentIDs {
+                _ = try await sendRequest(
+                    api: api,
+                    path: "/api/v1/events/\(eventID)/participants/\(studentID)",
+                    method: "DELETE"
+                )
+            }
+        }
+    }
+
+    /// Участники для формы редактирования: основной ученик и добавленные вручную.
+    func formStudentIDs(api: SchoolAPI, event: EventTimelineDTO) async -> [Int] {
+        let participants = (try? await fetchEventParticipants(api: api, eventID: event.id))
+            ?? eventParticipants[event.id]
+
+        return event.formStudentIDs(participants: participants, classes: filterClasses)
+    }
+
+    private func fetchEventParticipants(api: SchoolAPI, eventID: Int) async throws -> [EventParticipantDTO] {
+        let data = try await sendRequest(
+            api: api,
+            path: "/api/v1/events/\(eventID)/participants",
+            method: "GET"
+        )
+
+        return try JSONDecoder().decode(EventParticipantsListResponseDTO.self, from: data).items
     }
 
     func participantsForEvent(_ eventID: Int) -> [EventParticipantDTO] {
@@ -406,20 +575,46 @@ final class EventsViewModel: ObservableObject {
         api: SchoolAPI,
         eventID: Int
     ) async {
+        // Ответ по ранее открытому событию не должен перезаписать новый выбор.
+        participantsTask?.cancel()
+        participantsRequestID += 1
+        let requestID = participantsRequestID
+
+        let task = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            await self.performLoadEventParticipants(api: api, eventID: eventID, requestID: requestID)
+        }
+        participantsTask = task
+        await task.value
+    }
+
+    private func performLoadEventParticipants(
+        api: SchoolAPI,
+        eventID: Int,
+        requestID: Int
+    ) async {
         isLoadingParticipants = true
         errorMessage = nil
 
         do {
-            let data = try await sendRequest(
-                api: api,
-                path: "/api/v1/events/\(eventID)/participants",
-                method: "GET"
-            )
+            let items = try await fetchEventParticipants(api: api, eventID: eventID)
 
-            let decoded = try JSONDecoder().decode(EventParticipantsListResponseDTO.self, from: data)
-            eventParticipants[eventID] = decoded.items
+            guard !Task.isCancelled, requestID == participantsRequestID else {
+                return
+            }
+
+            eventParticipants[eventID] = items
         } catch {
-            errorMessage = "Не удалось загрузить участников события: \(error.localizedDescription)"
+            guard !Task.isCancelled, requestID == participantsRequestID else {
+                return
+            }
+
+            if (error as? URLError)?.code != .cancelled {
+                errorMessage = "Не удалось загрузить участников события: \(error.localizedDescription)"
+            }
         }
 
         isLoadingParticipants = false
@@ -554,43 +749,44 @@ final class EventsViewModel: ObservableObject {
 
     func eventTypeTitle(_ value: String) -> String {
         switch value {
+        case "school":
+            return "Общее"
+        case "class":
+            return "Классное"
         case "meeting":
             return "Собрание"
-        case "holiday":
-            return "Праздник"
-        case "exam":
-            return "Экзамен"
         case "trip":
             return "Экскурсия"
-        case "competition":
+        case "contest", "competition":
             return "Конкурс"
         case "sport":
             return "Спорт"
+        case "holiday":
+            return "Праздник"
+        // Коды, которые могли остаться у старых событий.
+        case "exam":
+            return "Экзамен"
         case "club":
             return "Кружок"
-        case "class":
-            return "Класс"
         case "other":
             return "Другое"
         default:
-            return value
+            return "Событие"
         }
     }
 
     func participationStatusTitle(_ value: String) -> String {
+        if let title = participationStatuses.first(where: { $0.code == value })?.title {
+            return title
+        }
+
         switch value {
         case "pending":
-            return "Ожидает"
-        case "confirmed":
-            return "Участвует"
-        case "declined":
-            return "Не участвует"
-        case "attended":
-            return "Был"
+            return "Ожидает ответа"
         case "absent":
-            return "Не был"
+            return "Отсутствовал"
         default:
-            return value
+            return "Статус не указан"
         }
     }
 
@@ -830,15 +1026,11 @@ enum EventsError: LocalizedError {
         case .noToken:
             return "Нет токена авторизации. Войдите снова."
         case .badURL:
-            return "Некорректный URL."
+            return "Некорректный адрес запроса."
         case .badResponse:
             return "Некорректный ответ сервера."
         case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
-            }
+            return APIRequestError.serverError(statusCode: statusCode, text: text).errorDescription
         }
     }
 }

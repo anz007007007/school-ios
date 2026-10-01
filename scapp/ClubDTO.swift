@@ -27,6 +27,49 @@ struct ClubDTO: Codable, Identifiable, Hashable {
     let free_places: Int?
     let enrolled_names: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, description, weekday, start_time, end_time, capacity
+        case price_amount, payment_type, price_period
+        case teacher_name, teacher_id, teacher_user_id
+        case teacher_phone, teacher_mobile_phone, teacher_contact_phone
+        case status, enrolled_count, waiting_count, free_places, enrolled_names
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        weekday = try c.decode(Int.self, forKey: .weekday)
+        start_time = try c.decode(String.self, forKey: .start_time)
+        end_time = try c.decode(String.self, forKey: .end_time)
+        capacity = try c.decodeIfPresent(Int.self, forKey: .capacity) ?? 0
+
+        // Decimal приходит строкой ("1500.00"), но на всякий случай принимаем и число.
+        if let text = try? c.decodeIfPresent(String.self, forKey: .price_amount) {
+            price_amount = text
+        } else if let number = try? c.decodeIfPresent(Double.self, forKey: .price_amount) {
+            price_amount = String(number)
+        } else {
+            price_amount = "0"
+        }
+
+        payment_type = try c.decodeIfPresent(String.self, forKey: .payment_type)
+        price_period = try c.decodeIfPresent(String.self, forKey: .price_period)
+        // У кружка может не быть преподавателя: teacher_name тогда null.
+        teacher_name = (try c.decodeIfPresent(String.self, forKey: .teacher_name)) ?? "Не назначен"
+        teacher_id = try c.decodeIfPresent(Int.self, forKey: .teacher_id)
+        teacher_user_id = try c.decodeIfPresent(Int.self, forKey: .teacher_user_id)
+        teacher_phone = try c.decodeIfPresent(String.self, forKey: .teacher_phone)
+        teacher_mobile_phone = try c.decodeIfPresent(String.self, forKey: .teacher_mobile_phone)
+        teacher_contact_phone = try c.decodeIfPresent(String.self, forKey: .teacher_contact_phone)
+        status = try c.decode(String.self, forKey: .status)
+        enrolled_count = try c.decodeIfPresent(Int.self, forKey: .enrolled_count) ?? 0
+        waiting_count = try c.decodeIfPresent(Int.self, forKey: .waiting_count)
+        free_places = try c.decodeIfPresent(Int.self, forKey: .free_places)
+        enrolled_names = try c.decodeIfPresent(String.self, forKey: .enrolled_names)
+    }
+
     var availableSpots: Int {
         if let free_places {
             return max(free_places, 0)
@@ -39,8 +82,9 @@ struct ClubDTO: Codable, Identifiable, Hashable {
         capacity > 0 && availableSpots <= 0
     }
 
+    /// Код оплаты сервера: free | lesson | hour | month | course (schemas/education.py).
     var paymentTypeValue: String? {
-        payment_type ?? price_period
+        price_period ?? payment_type
     }
 
     var resolvedTeacherPhone: String? {
@@ -55,8 +99,9 @@ struct ClubDTO: Codable, Identifiable, Hashable {
             .first { !$0.isEmpty }
     }
 
+    /// ID пользователя преподавателя (teacher_id — это ID записи учителя, не пользователя).
     var resolvedTeacherUserID: Int? {
-        teacher_user_id ?? teacher_id
+        teacher_user_id
     }
 
     var enrolledStudentIDs: Set<Int> {

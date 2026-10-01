@@ -99,10 +99,8 @@ struct HealthCardDTO: Codable, Identifiable, Hashable {
         case "high":
             return "Высокий"
         case "critical":
-            return "Критический"
-        case let value?:
-            return value
-        case nil:
+            return "Высокий"
+        default:
             return "Не указан"
         }
     }

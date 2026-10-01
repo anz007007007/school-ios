@@ -39,16 +39,16 @@ struct TextbookDTO: Decodable, Identifiable, Hashable {
         switch material_type {
         case "textbook":
             return "Учебник"
+        case "literature":
+            return "Литература"
         case "workbook":
             return "Рабочая тетрадь"
         case "methodical":
             return "Методичка"
         case "presentation":
             return "Презентация"
-        case "other":
-            return "Материал"
         default:
-            return material_type
+            return "Материал"
         }
     }
 
@@ -81,7 +81,7 @@ struct TextbookDTO: Decodable, Identifiable, Hashable {
         [
             title,
             description ?? "",
-            material_type,
+            typeTitle,
             class_name ?? "",
             subject_name ?? ""
         ]

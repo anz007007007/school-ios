@@ -86,7 +86,7 @@ struct ClubsView: View {
                     weekdayTitle: viewModel.weekdayTitle(club.weekday),
                     statusTitle: viewModel.statusTitle(club.status),
                     paymentTypeTitle: viewModel.paymentTypeTitle(club.paymentTypeValue),
-                    canManage: appState.canManageClubs,
+                    canManage: appState.canManageClub(club),
                     canManageEnrollment: appState.canSelfEnrollClubs,
                     canMessageTeacher: appState.canSendMessages,
                     onMessageTeacher: {
@@ -554,7 +554,7 @@ struct ClubsView: View {
                                     }
                                 }
 
-                                if appState.canManageClubs {
+                                if appState.canManageClub(club) {
                                     Button(role: .destructive) {
                                         clubToDelete = club
                                         isShowingDeleteConfirmation = true
@@ -923,13 +923,6 @@ struct ClubDetailView: View {
                         }
                     }
                 }
-
-                Section("Система") {
-                    LabeledContent("ID кружка", value: "\(club.id)")
-                    LabeledContent("День недели", value: "\(club.weekday)")
-                    LabeledContent("Статус", value: club.status)
-                    LabeledContent("Тип оплаты", value: club.paymentTypeValue ?? "Не указан")
-                }
             }
             .scrollContentBackground(.hidden)
             .appScreenBackground()
@@ -1231,12 +1224,7 @@ struct ClubStudentsManagementView: View {
     @State private var selectedEnrollmentStatus = "active"
     @State private var validationMessage: String?
 
-    private let statuses: [(title: String, value: String)] = [
-        ("Записан", "active"),
-        ("Ожидает", "pending"),
-        ("Пауза", "paused"),
-        ("Выбыл", "left")
-    ]
+    private let statuses = ClubsViewModel.enrollmentStatusOptions
 
     var body: some View {
         NavigationStack {
@@ -1412,12 +1400,7 @@ struct ClubStudentRowView: View {
     let onStatusChange: (String) -> Void
     let onDelete: () -> Void
 
-    private let statuses: [(title: String, value: String)] = [
-        ("Записан", "active"),
-        ("Ожидает", "pending"),
-        ("Пауза", "paused"),
-        ("Выбыл", "left")
-    ]
+    private let statuses = ClubsViewModel.enrollmentStatusOptions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1459,7 +1442,7 @@ struct ClubStudentRowView: View {
         switch student.enrollment_status {
         case "active":
             return .green
-        case "pending":
+        case "waiting", "pending":
             return .orange
         case "paused":
             return .blue

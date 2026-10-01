@@ -396,10 +396,6 @@ struct HealthCardDetailView: View {
                         }
                     }
                 }
-
-                Section("Система") {
-                    LabeledContent("ID ученика", value: "\(card.student_id)")
-                }
             }
             .appThemedList()
             .navigationTitle("Медкарта")

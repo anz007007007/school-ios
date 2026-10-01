@@ -164,12 +164,22 @@ struct EventsView: View {
                         )
 
                         Task { @MainActor in
-                            _ = await viewModel.createEvent(
+                            viewModel.lastCreatedEventID = nil
+
+                            let success = await viewModel.createEvent(
                                 api: appState.api,
                                 formData: safeFormData
                             )
 
                             await markEventsNotificationsRead()
+
+                            // Открываем созданное событие по event_id из ответа сервера.
+                            if success,
+                               let newEventID = viewModel.lastCreatedEventID,
+                               let createdEvent = viewModel.events.first(where: { $0.id == newEventID }) {
+                                try? await Task.sleep(nanoseconds: 350_000_000)
+                                selectedEvent = createdEvent
+                            }
                         }
                     }
                 )
@@ -185,6 +195,9 @@ struct EventsView: View {
                     parseDate: viewModel.parseDate,
                     isSaving: viewModel.isSaving,
                     errorMessage: viewModel.errorMessage,
+                    loadFormStudentIDs: {
+                        await viewModel.formStudentIDs(api: appState.api, event: event)
+                    },
                     onSave: { formData in
                         let safeFormData = EventFormData(
                             title: String(formData.title),
@@ -548,8 +561,12 @@ struct EventsView: View {
             return .red
         case "trip":
             return .green
-        case "competition":
+        case "contest", "competition":
             return .purple
+        case "school":
+            return .indigo
+        case "class":
+            return .cyan
         case "sport":
             return .orange
         case "club":
@@ -831,12 +848,6 @@ struct EventDetailView: View {
                         }
                     }
                 }
-
-                Section("Система") {
-                    LabeledContent("ID события", value: "\(event.id)")
-                    LabeledContent("Тип", value: event.event_type)
-                    LabeledContent("Дата сервера", value: AppDateFormatter.dateTime(event.starts_at))
-                }
             }
             .appThemedList()
             .navigationTitle("Событие")
@@ -1073,7 +1084,7 @@ struct EventParticipantRowView: View {
                     Text(status.title).tag(status.code)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
         }
         .padding(.vertical, 6)
     }
@@ -1082,9 +1093,9 @@ struct EventParticipantRowView: View {
         switch participant.participation_status {
         case "confirmed", "attended":
             return .green
-        case "declined", "absent":
+        case "declined", "missed", "absent":
             return .red
-        case "pending":
+        case "invited", "maybe", "pending":
             return .orange
         default:
             return .secondary

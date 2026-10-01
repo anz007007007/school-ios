@@ -35,6 +35,8 @@ struct EventFormView: View {
     let parseDate: (String) -> Date?
     let isSaving: Bool
     let errorMessage: String?
+    /// Загружает учеников, добавленных вручную (основной + участники не из классов события).
+    let loadFormStudentIDs: (() async -> [Int])?
     let onSave: (EventFormData) -> Void
 
     @State private var eventTitle: String
@@ -44,6 +46,7 @@ struct EventFormView: View {
     @State private var selectedClassIDs: Set<Int>
     @State private var selectedStudentIDs: Set<Int>
     @State private var validationMessage: String?
+    @State private var isLoadingStudents = false
 
     init(
         mode: Mode,
@@ -55,6 +58,7 @@ struct EventFormView: View {
         parseDate: @escaping (String) -> Date?,
         isSaving: Bool,
         errorMessage: String?,
+        loadFormStudentIDs: (() async -> [Int])? = nil,
         onSave: @escaping (EventFormData) -> Void
     ) {
         self.mode = mode
@@ -66,14 +70,15 @@ struct EventFormView: View {
         self.parseDate = parseDate
         self.isSaving = isSaving
         self.errorMessage = errorMessage
+        self.loadFormStudentIDs = loadFormStudentIDs
         self.onSave = onSave
 
         _eventTitle = State(initialValue: event?.title ?? "")
-        _eventType = State(initialValue: event?.event_type ?? eventTypes.first ?? "class")
+        _eventType = State(initialValue: event?.event_type ?? eventTypes.first ?? "school")
         _startsAt = State(initialValue: event.flatMap { parseDate($0.starts_at) } ?? Date())
         _description = State(initialValue: event?.description ?? "")
-        _selectedClassIDs = State(initialValue: Set(event?.class_ids ?? []))
-        _selectedStudentIDs = State(initialValue: Set(event?.student_ids ?? []))
+        _selectedClassIDs = State(initialValue: Set(event?.formClassIDs(classes: classes) ?? []))
+        _selectedStudentIDs = State(initialValue: Set(event?.student_id.map { [$0] } ?? []))
     }
 
     var body: some View {
@@ -102,6 +107,16 @@ struct EventFormView: View {
             }
             .navigationTitle(mode.title)
             .navigationBarTitleDisplayMode(.inline)
+            .task {
+                guard let loadFormStudentIDs else {
+                    return
+                }
+
+                isLoadingStudents = true
+                let studentIDs = await loadFormStudentIDs()
+                selectedStudentIDs.formUnion(studentIDs)
+                isLoadingStudents = false
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Отмена") {
@@ -120,7 +135,7 @@ struct EventFormView: View {
                             Text(mode.saveButtonTitle)
                         }
                     }
-                    .disabled(isSaving)
+                    .disabled(isSaving || isLoadingStudents)
                 }
             }
         }
@@ -171,6 +186,14 @@ struct EventFormView: View {
                 }
             }
 
+            if isLoadingStudents {
+                HStack {
+                    ProgressView()
+                    Text("Загружаем участников...")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if !students.isEmpty {
                 DisclosureGroup("Ученики: \(selectedStudentIDs.count)") {
                     ForEach(students) { item in
@@ -192,7 +215,7 @@ struct EventFormView: View {
         } header: {
             Text("Участники")
         } footer: {
-            Text("Если не выбрать классы или учеников, событие будет создано без привязки к конкретной аудитории либо для общей аудитории — зависит от логики сервера.")
+            Text("Ученики выбранных классов добавляются в участники автоматически. Отдельно отметьте учеников не из этих классов.")
         }
     }
 

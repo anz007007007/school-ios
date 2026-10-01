@@ -84,6 +84,7 @@ struct TextbooksView: View {
             await viewModel.refresh(api: appState.api)
         }
         .task {
+            viewModel.includeInactive = canManage
             await viewModel.loadInitialData(api: appState.api)
         }
         .toolbar {
@@ -205,7 +206,16 @@ struct TextbooksView: View {
             return
         }
 
-        UIApplication.shared.open(url)
+        guard UIApplication.shared.canOpenURL(url) else {
+            viewModel.errorMessage = "Не удалось открыть файл: нет подходящего приложения."
+            return
+        }
+
+        UIApplication.shared.open(url, options: [:]) { opened in
+            if !opened {
+                viewModel.errorMessage = "Не удалось открыть файл: нет подходящего приложения."
+            }
+        }
     }
 }
 
@@ -444,7 +454,7 @@ struct TextbookFormView: View {
                             .font(.footnote)
                             .foregroundStyle(AppTheme.control)
                     } else if mode == .edit, item?.file_url != nil {
-                        Label("Текущий файл сохранится, если не выбрать новый.", systemImage: "checkmark.circle.fill")
+                        Label("Текущий файл сохранится, если не выбрать новый. Новый файл загрузится как новый материал, прежний будет удалён.", systemImage: "checkmark.circle.fill")
                             .font(.footnote)
                             .foregroundStyle(AppTheme.success)
                     } else {
@@ -498,17 +508,7 @@ struct TextbookFormView: View {
             }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: [
-                    .pdf,
-                    .text,
-                    .plainText,
-                    .image,
-                    .jpeg,
-                    .png,
-                    .presentation,
-                    .spreadsheet,
-                    .data
-                ],
+                allowedContentTypes: TextbookFormView.allowedFileTypes,
                 allowsMultipleSelection: false
             ) { result in
                 handleFileImport(result)
@@ -516,10 +516,32 @@ struct TextbookFormView: View {
         }
     }
 
+    /// Форматы, которые принимает сервер (routers/textbooks.py ALLOWED_EXTENSIONS).
+    static let allowedFileExtensions: Set<String> = ["pdf", "doc", "docx", "jpg", "jpeg", "png", "webp"]
+
+    static var allowedFileTypes: [UTType] {
+        var types: [UTType] = [.pdf, .jpeg, .png]
+
+        for fileExtension in ["doc", "docx", "webp"] {
+            if let type = UTType(filenameExtension: fileExtension) {
+                types.append(type)
+            }
+        }
+
+        return types
+    }
+
     private func handleFileImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
             guard let selectedURL = urls.first else {
+                return
+            }
+
+            let fileExtension = selectedURL.pathExtension.lowercased()
+
+            guard Self.allowedFileExtensions.contains(fileExtension) else {
+                validationMessage = "Неподходящий формат файла. Можно загрузить PDF, DOC, DOCX, JPG, PNG или WEBP."
                 return
             }
 

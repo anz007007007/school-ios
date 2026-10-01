@@ -19,12 +19,16 @@ final class TextbooksViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
+    /// Admin/manager видят и отключённые материалы (сервер учитывает include_inactive только для них).
+    var includeInactive = false
+
     static let defaultMaterialTypes: [TextbookMaterialTypeFilterDTO] = [
+        // Коды сервера: textbook | literature | workbook | methodical | other (schemas/textbooks.py).
         TextbookMaterialTypeFilterDTO(code: "textbook", name: "Учебник"),
+        TextbookMaterialTypeFilterDTO(code: "literature", name: "Литература"),
         TextbookMaterialTypeFilterDTO(code: "workbook", name: "Рабочая тетрадь"),
         TextbookMaterialTypeFilterDTO(code: "methodical", name: "Методичка"),
-        TextbookMaterialTypeFilterDTO(code: "presentation", name: "Презентация"),
-        TextbookMaterialTypeFilterDTO(code: "other", name: "Материал")
+        TextbookMaterialTypeFilterDTO(code: "other", name: "Другое")
     ]
 
     var filteredItems: [TextbookDTO] {
@@ -93,11 +97,12 @@ final class TextbooksViewModel: ObservableObject {
             classes = response.classes.sorted { $0.name < $1.name }
             subjects = response.subjects.sorted { $0.name < $1.name }
 
-            if let loadedTypes = response.material_types,
+            let allowedCodes = Set(Self.defaultMaterialTypes.map { $0.code })
+
+            if let loadedTypes = response.material_types?
+                .filter({ allowedCodes.contains($0.code) }),
                !loadedTypes.isEmpty {
                 materialTypes = loadedTypes
-                    .filter { !$0.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                    .sorted { $0.name < $1.name }
             }
         } catch {
             errorMessage = "Не удалось загрузить фильтры: \(error.localizedDescription)"
@@ -109,6 +114,10 @@ final class TextbooksViewModel: ObservableObject {
             var queryItems: [URLQueryItem] = [
                 URLQueryItem(name: "sort_by", value: "class_subject_title")
             ]
+
+            if includeInactive {
+                queryItems.append(URLQueryItem(name: "include_inactive", value: "true"))
+            }
 
             if selectedClassID != 0 {
                 queryItems.append(URLQueryItem(name: "class_id", value: "\(selectedClassID)"))
@@ -174,13 +183,42 @@ final class TextbooksViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
 
+        if formData.fileURL != nil {
+            return await replaceItemFile(api: api, itemID: itemID, formData: formData)
+        }
+
+        let cleanDescription = formData.description.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Сервер принимает изменения JSON-запросом (TextbookUpdateRequest), пустые поля — через clear_*.
+        var body: [String: Any] = [
+            "title": formData.title.trimmingCharacters(in: .whitespacesAndNewlines),
+            "material_type": formData.materialType,
+            "sort_order": formData.sortOrder,
+            "is_active": formData.isActive,
+            "clear_description": cleanDescription.isEmpty,
+            "clear_class_id": formData.classID == 0,
+            "clear_subject_id": formData.subjectID == 0
+        ]
+
+        if !cleanDescription.isEmpty {
+            body["description"] = cleanDescription
+        }
+
+        if formData.classID != 0 {
+            body["class_id"] = formData.classID
+        }
+
+        if formData.subjectID != 0 {
+            body["subject_id"] = formData.subjectID
+        }
+
         do {
-            _ = try await multipartRequest(
+            _ = try await APIRequestService.shared.request(
                 api: api,
                 path: "/api/v1/textbooks/\(itemID)",
                 method: "PUT",
-                formData: formData,
-                requireFile: false
+                body: body,
+                logPrefix: "TEXTBOOK UPDATE"
             )
 
             successMessage = "Учебник обновлён"
@@ -193,6 +231,43 @@ final class TextbooksViewModel: ObservableObject {
             isSaving = false
             return false
         }
+    }
+
+    /// Файл на сервере заменить нельзя: загружаем новый материал с теми же полями
+    /// и удаляем прежний только после успешной загрузки.
+    private func replaceItemFile(api: SchoolAPI, itemID: Int, formData: TextbookFormData) async -> Bool {
+        do {
+            _ = try await multipartRequest(
+                api: api,
+                path: "/api/v1/textbooks",
+                method: "POST",
+                formData: formData,
+                requireFile: true
+            )
+        } catch {
+            errorMessage = "Не удалось загрузить новый файл: \(error.localizedDescription)"
+            isSaving = false
+            return false
+        }
+
+        do {
+            _ = try await APIRequestService.shared.request(
+                api: api,
+                path: "/api/v1/textbooks/\(itemID)",
+                method: "DELETE",
+                logPrefix: "TEXTBOOK DELETE OLD"
+            )
+
+            successMessage = "Учебник обновлён, файл заменён"
+        } catch {
+            // Новый материал уже создан — форму закрываем, чтобы не загрузить его повторно.
+            errorMessage = "Новый файл загружен, но прежний материал удалить не удалось. Удалите его вручную."
+        }
+
+        await loadItems(api: api)
+
+        isSaving = false
+        return true
     }
 
     func deleteItem(api: SchoolAPI, itemID: Int) async -> Bool {
@@ -281,7 +356,9 @@ final class TextbooksViewModel: ObservableObject {
         body.append("--\(boundary)--\r\n")
         request.httpBody = body
 
+        #if DEBUG
         print("TEXTBOOK MULTIPART REQUEST:", method, url.absoluteString)
+        #endif
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -291,8 +368,10 @@ final class TextbooksViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("TEXTBOOK MULTIPART STATUS:", httpResponse.statusCode)
         print("TEXTBOOK MULTIPART RESPONSE:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()
@@ -343,20 +422,16 @@ final class TextbooksViewModel: ObservableObject {
             return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         }
 
-        if lower.hasSuffix(".ppt") {
-            return "application/vnd.ms-powerpoint"
-        }
-
-        if lower.hasSuffix(".pptx") {
-            return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        }
-
         if lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") {
             return "image/jpeg"
         }
 
         if lower.hasSuffix(".png") {
             return "image/png"
+        }
+
+        if lower.hasSuffix(".webp") {
+            return "image/webp"
         }
 
         return "application/octet-stream"
@@ -393,25 +468,19 @@ enum TextbookRequestError: LocalizedError {
             return "Выберите файл учебника."
 
         case .serverError(let statusCode, let text):
-            let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if statusCode == 401 {
-                return "Сессия истекла. Войдите снова."
+            if text.contains("Allowed file formats") {
+                return "Неподходящий формат файла. Можно загрузить PDF, DOC, DOCX, JPG, PNG или WEBP."
             }
 
-            if statusCode == 403 {
-                return "У вас нет прав на это действие."
+            if text.contains("File is too large") {
+                return "Файл слишком большой. Максимальный размер — 50 МБ."
             }
 
-            if statusCode == 422 {
-                return cleanText.isEmpty ? "Проверьте заполнение полей." : "Проверьте заполнение полей. \(cleanText)"
+            if text.contains("File is empty") {
+                return "Файл пустой. Выберите другой файл."
             }
 
-            if statusCode >= 500 {
-                return "Ошибка сервера. Попробуйте позже."
-            }
-
-            return cleanText.isEmpty ? "Ошибка сервера: \(statusCode)" : "Ошибка сервера: \(statusCode). \(cleanText)"
+            return APIRequestError.serverError(statusCode: statusCode, text: text).errorDescription
         }
     }
 }

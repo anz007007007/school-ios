@@ -1052,22 +1052,43 @@ final class AppState: ObservableObject {
         ])
     }
 
+    /// events.py: управлять событиями могут admin/manager и учитель с правом events.manage.
     var canManageEvents: Bool {
-        hasAnyPermission([
+        isAdmin || isManager || (isTeacher && hasAnyPermission([
+            "events.manage",
+            "events:manage",
             "events:create",
             "events:update",
             "events:delete",
             "admin:events"
-        ])
+        ]))
     }
 
+    /// clubs.py: создавать и менять кружки могут admin/manager и учитель с правом clubs.manage.
     var canManageClubs: Bool {
-        hasAnyPermission([
+        isAdmin || isManager || (isTeacher && hasAnyPermission([
+            "clubs.manage",
+            "clubs:manage",
             "clubs:create",
             "clubs:update",
             "clubs:delete",
             "admin:clubs"
-        ])
+        ]))
+    }
+
+    /// clubs.py _ensure_can_manage_club: учитель меняет, удаляет и записывает учеников только в свои кружки.
+    func canManageClub(_ club: ClubDTO) -> Bool {
+        if isAdmin || isManager {
+            return true
+        }
+
+        guard canManageClubs,
+              let userID = currentUser?.id,
+              let teacherUserID = club.teacher_user_id else {
+            return false
+        }
+
+        return teacherUserID == userID
     }
 
     var canManageSchedule: Bool {

@@ -23,6 +23,9 @@ final class ClubsViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
+    private var clubStudentsTask: Task<Void, Never>?
+    private var clubStudentsRequestID = 0
+
     enum WeekdayFilter: String, CaseIterable, Identifiable {
         case all = "Все"
         case monday = "Пн"
@@ -469,6 +472,27 @@ final class ClubsViewModel: ObservableObject {
         api: SchoolAPI,
         clubID: Int
     ) async {
+        // Новая загрузка отменяет предыдущую: ответ старого запроса не перепишет список.
+        clubStudentsTask?.cancel()
+        clubStudentsRequestID += 1
+        let requestID = clubStudentsRequestID
+
+        let task = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            await self.performLoadClubStudents(api: api, clubID: clubID, requestID: requestID)
+        }
+        clubStudentsTask = task
+        await task.value
+    }
+
+    private func performLoadClubStudents(
+        api: SchoolAPI,
+        clubID: Int,
+        requestID: Int
+    ) async {
         isLoadingClubStudents = true
         errorMessage = nil
 
@@ -480,8 +504,22 @@ final class ClubsViewModel: ObservableObject {
             )
 
             let decoded = try JSONDecoder().decode(ClubStudentsListResponseDTO.self, from: data)
+
+            guard !Task.isCancelled, requestID == clubStudentsRequestID else {
+                return
+            }
+
             clubStudents[clubID] = decoded.items
         } catch {
+            guard !Task.isCancelled, requestID == clubStudentsRequestID else {
+                return
+            }
+
+            if (error as? URLError)?.code == .cancelled {
+                isLoadingClubStudents = false
+                return
+            }
+
             errorMessage = "Не удалось загрузить учеников кружка: \(error.localizedDescription)"
         }
 
@@ -702,7 +740,7 @@ final class ClubsViewModel: ObservableObject {
             "end_time": endTime,
             "capacity": capacity,
             "price_amount": priceAmount.isEmpty ? "0" : priceAmount,
-            "payment_type": paymentType,
+            "price_period": Self.normalizedPricePeriod(paymentType) ?? "free",
             "teacher_id": teacherID,
             "status": status
         ]
@@ -759,44 +797,75 @@ final class ClubsViewModel: ObservableObject {
         case "archived":
             return "Архив"
         default:
-            return status
+            return "Статус не указан"
         }
     }
+
+    /// Статусы записи в кружок (schemas/education.py ClubEnrollmentCreateRequest).
+    static let enrollmentStatusOptions: [(title: String, value: String)] = [
+        ("Записан", "active"),
+        ("Ожидание", "waiting"),
+        ("Пауза", "paused"),
+        ("Выбыл", "left")
+    ]
 
     func enrollmentStatusTitle(_ status: String) -> String {
         switch status {
         case "active":
             return "Записан"
+        case "waiting", "pending":
+            return "Ожидание"
         case "paused":
             return "Пауза"
         case "left":
             return "Выбыл"
-        case "pending":
-            return "Ожидает"
         default:
-            return status
+            return "Статус не указан"
+        }
+    }
+
+    /// Варианты оплаты сервера: free | lesson | hour | month | course.
+    static let pricePeriodOptions: [(title: String, value: String)] = [
+        ("Бесплатно", "free"),
+        ("За занятие", "lesson"),
+        ("За час", "hour"),
+        ("В месяц", "month"),
+        ("За курс", "course")
+    ]
+
+    /// Приводит код оплаты к серверному (старые коды приложения тоже понимаем).
+    static func normalizedPricePeriod(_ value: String?) -> String? {
+        switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "free":
+            return "free"
+        case "lesson", "per_lesson":
+            return "lesson"
+        case "hour", "per_hour":
+            return "hour"
+        case "month", "monthly":
+            return "month"
+        case "course", "term", "one_time":
+            return "course"
+        default:
+            return nil
         }
     }
 
     func paymentTypeTitle(_ value: String?) -> String {
-        switch value {
-        case "free":
-            return "Бесплатно"
-        case "monthly":
-            return "Ежемесячно"
-        case "per_lesson":
-            return "За занятие"
-        case "one_time":
-            return "Разово"
-        case "term":
-            return "За период"
-        default:
-            return value ?? "Не указан"
+        guard let code = Self.normalizedPricePeriod(value) else {
+            return "Не указан"
         }
+
+        return Self.pricePeriodOptions.first { $0.value == code }?.title ?? "Не указан"
     }
 
     func teacherID(for club: ClubDTO) -> Int {
-        filterTeachers.first {
+        if let teacherID = club.teacher_id,
+           filterTeachers.contains(where: { $0.id == teacherID }) {
+            return teacherID
+        }
+
+        return filterTeachers.first {
             club.teacher_name.localizedCaseInsensitiveContains($0.teacher_name)
             || $0.teacher_name.localizedCaseInsensitiveContains(club.teacher_name)
         }?.id ?? 0
@@ -880,15 +949,11 @@ enum ClubsError: LocalizedError {
         case .noToken:
             return "Нет токена авторизации. Войдите снова."
         case .badURL:
-            return "Некорректный URL."
+            return "Некорректный адрес запроса."
         case .badResponse:
             return "Некорректный ответ сервера."
         case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
-            }
+            return APIRequestError.serverError(statusCode: statusCode, text: text).errorDescription
         }
     }
 }

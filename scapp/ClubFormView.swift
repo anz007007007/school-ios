@@ -70,7 +70,7 @@ struct ClubFormView: View {
         _endTime = State(initialValue: Self.dateFromTime(club?.end_time) ?? Date().addingTimeInterval(3600))
         _capacity = State(initialValue: club?.capacity ?? 10)
         _priceAmount = State(initialValue: club?.price_amount ?? "0")
-        _paymentType = State(initialValue: club?.payment_type ?? "monthly")
+        _paymentType = State(initialValue: ClubsViewModel.normalizedPricePeriod(club?.paymentTypeValue) ?? "month")
         _teacherID = State(initialValue: initialTeacherID)
         _status = State(initialValue: club?.status ?? "active")
     }
@@ -187,11 +187,9 @@ struct ClubFormView: View {
     private var paymentSection: some View {
         Section("Оплата") {
             Picker("Тип оплаты", selection: $paymentType) {
-                Text("Бесплатно").tag("free")
-                Text("Ежемесячно").tag("monthly")
-                Text("За занятие").tag("per_lesson")
-                Text("Разово").tag("one_time")
-                Text("За период").tag("term")
+                ForEach(ClubsViewModel.pricePeriodOptions, id: \.value) { option in
+                    Text(option.title).tag(option.value)
+                }
             }
 
             TextField("Стоимость", text: $priceAmount)

@@ -22,6 +22,10 @@ final class SchoolMenuViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var successMessage: String?
 
+    private var weekTask: Task<Void, Never>?
+    private var weekRequestID = 0
+    private var weekOwnsLoading = false
+
     struct MenuDay: Identifiable, Hashable {
         let date: Date
         let dateString: String
@@ -112,7 +116,8 @@ final class SchoolMenuViewModel: ObservableObject {
         var result = weekItems
 
         if selectedClassID != 0 {
-            result = result.filter { $0.class_id == selectedClassID }
+            // Общее меню (class_id = null) относится ко всем классам.
+            result = result.filter { $0.class_id == nil || $0.class_id == selectedClassID }
         }
 
         if selectedMealType != "all" {
@@ -124,7 +129,7 @@ final class SchoolMenuViewModel: ObservableObject {
         if !query.isEmpty {
             result = result.filter { item in
                 item.dish_name.localizedCaseInsensitiveContains(query)
-                || item.meal_type.localizedCaseInsensitiveContains(query)
+                || mealTypeTitle(item.meal_type).localizedCaseInsensitiveContains(query)
                 || (item.class_name ?? "").localizedCaseInsensitiveContains(query)
                 || (item.dish_description ?? "").localizedCaseInsensitiveContains(query)
                 || (item.allergens ?? "").localizedCaseInsensitiveContains(query)
@@ -250,14 +255,46 @@ final class SchoolMenuViewModel: ObservableObject {
         api: SchoolAPI,
         showLoading: Bool = true
     ) async {
+        // Новая загрузка отменяет предыдущую: ответ по старой неделе или классу не перепишет выбор.
+        weekTask?.cancel()
+        weekRequestID += 1
+        let requestID = weekRequestID
+
+        let task = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            await self.performLoadWeek(api: api, showLoading: showLoading, requestID: requestID)
+        }
+        weekTask = task
+        await task.value
+    }
+
+    private func performLoadWeek(
+        api: SchoolAPI,
+        showLoading: Bool,
+        requestID: Int
+    ) async {
         if showLoading {
             isLoading = true
+            weekOwnsLoading = true
         }
 
         errorMessage = nil
 
+        let requestedWeekStart = weekStartDate(selectedWeekStart)
+        let requestedClassID = selectedClassID
+
+        defer {
+            if requestID == weekRequestID && weekOwnsLoading {
+                isLoading = false
+                weekOwnsLoading = false
+            }
+        }
+
         do {
-            let weekStart = Self.apiDateFormatter.string(from: weekStartDate(selectedWeekStart))
+            let weekStart = Self.apiDateFormatter.string(from: requestedWeekStart)
 
             var queryItems: [URLQueryItem] = [
                 URLQueryItem(name: "week_start", value: weekStart)
@@ -275,17 +312,27 @@ final class SchoolMenuViewModel: ObservableObject {
             )
 
             let decoded = try JSONDecoder().decode(WeeklyMenuResponseDTO.self, from: data)
+
+            guard !Task.isCancelled,
+                  requestID == weekRequestID,
+                  requestedWeekStart == weekStartDate(selectedWeekStart),
+                  requestedClassID == selectedClassID else {
+                return
+            }
+
             weekItems = decoded.items
 
             if selectedDate.isEmpty {
-                selectedDate = Self.apiDateFormatter.string(from: weekStartDate(selectedWeekStart))
+                selectedDate = Self.apiDateFormatter.string(from: requestedWeekStart)
             }
         } catch {
-            errorMessage = "Не удалось загрузить меню недели: \(error.localizedDescription)"
-        }
+            guard !Task.isCancelled, requestID == weekRequestID else {
+                return
+            }
 
-        if showLoading {
-            isLoading = false
+            if (error as? URLError)?.code != .cancelled {
+                errorMessage = "Не удалось загрузить меню недели: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -535,7 +582,7 @@ final class SchoolMenuViewModel: ObservableObject {
         case "dinner":
             return "Ужин"
         default:
-            return value
+            return "Приём пищи"
         }
     }
 
@@ -671,7 +718,7 @@ final class SchoolMenuViewModel: ObservableObject {
             MealTypeDTO(code: "breakfast", name: "Завтрак"),
             MealTypeDTO(code: "second_breakfast", name: "Второй завтрак"),
             MealTypeDTO(code: "lunch", name: "Обед"),
-            MealTypeDTO(code: "snack", name: "Полдник"),
+            MealTypeDTO(code: "afternoon_snack", name: "Полдник"),
             MealTypeDTO(code: "dinner", name: "Ужин")
         ]
     }
@@ -716,15 +763,11 @@ enum SchoolMenuError: LocalizedError {
         case .noToken:
             return "Нет токена авторизации. Войдите снова."
         case .badURL:
-            return "Некорректный URL."
+            return "Некорректный адрес запроса."
         case .badResponse:
             return "Некорректный ответ сервера."
         case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            } else {
-                return "Ошибка сервера: \(statusCode). \(text)"
-            }
+            return APIRequestError.serverError(statusCode: statusCode, text: text).errorDescription
         }
     }
 }

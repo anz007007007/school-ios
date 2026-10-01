@@ -42,7 +42,7 @@ final class HealthViewModel: ObservableObject {
                 || (card.daily_regimen ?? "").localizedCaseInsensitiveContains(query)
                 || (card.emergency_contact ?? "").localizedCaseInsensitiveContains(query)
                 || (card.doctor_contacts ?? "").localizedCaseInsensitiveContains(query)
-                || (card.risk_level ?? "").localizedCaseInsensitiveContains(query)
+                || card.riskTitle.localizedCaseInsensitiveContains(query)
                 || (card.physical_restrictions ?? "").localizedCaseInsensitiveContains(query)
                 || (card.effectiveVaccinationNotes ?? "").localizedCaseInsensitiveContains(query)
                 || (card.effectiveNotes ?? "").localizedCaseInsensitiveContains(query)
@@ -196,7 +196,7 @@ final class HealthViewModel: ObservableObject {
                 "emergency_contact": cleanOptional(formData.emergencyContact) as Any,
                 "doctor_contacts": cleanOptional(formData.doctorContacts) as Any,
 
-                "risk_level": cleanOptional(formData.riskLevel) as Any,
+                "risk_level": cleanOptional(formData.riskLevel) ?? "low",
                 "physical_restrictions": cleanOptional(formData.physicalRestrictions) as Any,
                 "vaccination_notes": cleanOptional(formData.vaccinationNotes) as Any,
                 "last_checkup_at": cleanOptional(formData.lastCheckupAt) as Any,
@@ -312,21 +312,17 @@ enum HealthError: LocalizedError {
             return "Нет токена авторизации. Войдите снова."
 
         case .badURL:
-            return "Некорректный URL."
+            return "Некорректный адрес запроса."
 
         case .badResponse:
             return "Некорректный ответ сервера."
 
         case .serverError(let statusCode, let text):
-            if text.isEmpty {
-                return "Ошибка сервера: \(statusCode)"
-            }
-
             if let readable = Self.readableDetail(from: text) {
                 return readable
             }
 
-            return "Ошибка сервера: \(statusCode). \(text)"
+            return APIRequestError.serverError(statusCode: statusCode, text: text).errorDescription
         }
     }
 
@@ -340,10 +336,20 @@ enum HealthError: LocalizedError {
         switch detail {
         case "Student is not attached to this parent":
             return "Этот ученик не привязан к вашему профилю."
-        case "Permission denied":
+        case "Permission denied",
+             "You do not have access to manage health cards",
+             "You do not have access to health data":
             return "Нет прав на просмотр или редактирование медкарты."
+        case "Health card not found":
+            return "Медкарта не найдена."
+        case "Student not found":
+            return "Ученик не найден."
+        case "You do not have access to this student":
+            return "Нет доступа к этому ученику."
+        case "Payload student_id does not match path student_id":
+            return "Не удалось сохранить медкарту: ученик указан неверно."
         default:
-            return detail
+            return nil
         }
     }
 }

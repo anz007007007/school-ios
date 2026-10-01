@@ -25,6 +25,7 @@ struct HealthCardFormView: View {
     @State private var doctorContacts: String
 
     @State private var riskLevel: String
+    @State private var validationMessage: String?
     @State private var physicalRestrictions: String
     @State private var vaccinationNotes: String
     @State private var lastCheckupAt: String
@@ -57,7 +58,7 @@ struct HealthCardFormView: View {
         _emergencyContact = State(initialValue: card.emergency_contact ?? "")
         _doctorContacts = State(initialValue: card.doctor_contacts ?? "")
 
-        _riskLevel = State(initialValue: card.risk_level ?? "low")
+        _riskLevel = State(initialValue: Self.normalizedRiskLevel(card.risk_level))
         _physicalRestrictions = State(initialValue: card.physical_restrictions ?? "")
         _vaccinationNotes = State(initialValue: card.effectiveVaccinationNotes ?? "")
         _lastCheckupAt = State(initialValue: card.last_checkup_at ?? "")
@@ -73,8 +74,6 @@ struct HealthCardFormView: View {
                     if let className = card.class_name, !className.isEmpty {
                         LabeledContent("Класс", value: className)
                     }
-
-                    LabeledContent("ID ученика", value: "\(card.student_id)")
                 }
 
                 Section("Основное") {
@@ -103,7 +102,6 @@ struct HealthCardFormView: View {
                         Text("Низкий").tag("low")
                         Text("Средний").tag("medium")
                         Text("Высокий").tag("high")
-                        Text("Критический").tag("critical")
                     }
                 }
 
@@ -158,7 +156,7 @@ struct HealthCardFormView: View {
                 }
 
                 Section("Последний осмотр") {
-                    TextField("Дата, YYYY-MM-DD или пусто", text: $lastCheckupAt)
+                    TextField("Дата: ДД.ММ.ГГГГ", text: $lastCheckupAt)
                         .textInputAutocapitalization(.never)
 
                     Text("Если дата неизвестна — оставьте поле пустым.")
@@ -169,6 +167,13 @@ struct HealthCardFormView: View {
                 Section("Заметки") {
                     TextEditor(text: $notes)
                         .frame(minHeight: 120)
+                }
+
+                if let validationMessage {
+                    Section {
+                        Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
                 }
 
                 if let errorMessage {
@@ -208,7 +213,52 @@ struct HealthCardFormView: View {
         }
     }
 
+    /// Сервер принимает только low | medium | high (schemas/health.py).
+    private static func normalizedRiskLevel(_ value: String?) -> String {
+        switch value {
+        case "medium":
+            return "medium"
+        case "high", "critical":
+            return "high"
+        default:
+            return "low"
+        }
+    }
+
+    /// Дата осмотра для сервера в формате ГГГГ-ММ-ДД; nil — дата введена неверно.
+    private static func normalizedCheckupDate(_ value: String) -> String? {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if clean.isEmpty {
+            return ""
+        }
+
+        let output = DateFormatter()
+        output.locale = Locale(identifier: "en_US_POSIX")
+        output.dateFormat = "yyyy-MM-dd"
+
+        for format in ["yyyy-MM-dd", "dd.MM.yyyy", "d.M.yyyy"] {
+            let input = DateFormatter()
+            input.locale = Locale(identifier: "en_US_POSIX")
+            input.dateFormat = format
+            input.isLenient = false
+
+            if let date = input.date(from: clean) {
+                return output.string(from: date)
+            }
+        }
+
+        return nil
+    }
+
     private func save() {
+        validationMessage = nil
+
+        guard let checkupDate = Self.normalizedCheckupDate(lastCheckupAt) else {
+            validationMessage = "Дата осмотра указана неверно. Введите её в формате ДД.ММ.ГГГГ или оставьте поле пустым."
+            return
+        }
+
         let formData = HealthCardFormData(
             studentID: card.student_id,
             bloodType: bloodType,
@@ -226,7 +276,7 @@ struct HealthCardFormView: View {
             riskLevel: riskLevel,
             physicalRestrictions: physicalRestrictions,
             vaccinationNotes: vaccinationNotes,
-            lastCheckupAt: lastCheckupAt,
+            lastCheckupAt: checkupDate,
             notes: notes
         )
 
