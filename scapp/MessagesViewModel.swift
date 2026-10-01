@@ -367,8 +367,10 @@ final class MessagesViewModel: ObservableObject {
     }
 
     func reloadForFilters(api: SchoolAPI) async {
-        await loadMessages(api: api)
-        await loadUnreadCount(api: api)
+        async let messagesTask: Void = loadMessages(api: api)
+        async let unreadCountTask: Void = loadUnreadCount(api: api)
+
+        _ = await (messagesTask, unreadCountTask)
     }
 
     func sendMessage(
@@ -780,10 +782,14 @@ final class MessagesViewModel: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("MESSAGES REQUEST:", method, url.absoluteString)
             print("MESSAGES BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("MESSAGES REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -794,8 +800,10 @@ final class MessagesViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("MESSAGES RESPONSE STATUS:", httpResponse.statusCode)
         print("MESSAGES RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

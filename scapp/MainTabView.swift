@@ -24,10 +24,23 @@ struct MainTabView: View {
     @State private var selectedTab: MainTabSelection = .dashboard
     @State private var showAIChat = false
 
+    private var selectedTabBinding: Binding<MainTabSelection> {
+        Binding(
+            get: { selectedTab },
+            set: { newValue in
+                if newValue == selectedTab {
+                    appState.bumpTabReselectToken(for: newValue)
+                }
+
+                selectedTab = newValue
+            }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
-                TabView(selection: $selectedTab) {
+                TabView(selection: selectedTabBinding) {
                     if appState.isAdmin {
                         themedTab {
                             DashboardView()
@@ -304,7 +317,6 @@ struct MainTabView: View {
                     .task {
                         await appState.markPushNotificationReadIfNeeded(route.notificationID)
                         await appState.markNotificationsReadForRoute(route)
-                        await appState.refreshUnreadNotificationsBySection()
                     }
             }
         }
@@ -313,18 +325,6 @@ struct MainTabView: View {
         .preferredColorScheme(.light)
         .onAppear {
             configureGlobalTheme()
-
-            Task {
-                await appState.refreshParentLinkedStudentsContextIfNeeded()
-                await appState.refreshUnreadNotificationsBySection()
-            }
-
-            guard !didProcessPendingPush else {
-                return
-            }
-
-            didProcessPendingPush = true
-            processPendingPushAfterDelay()
         }
         .task {
             await appState.refreshParentLinkedStudentsContextIfNeeded()
@@ -337,7 +337,6 @@ struct MainTabView: View {
             }
 
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: appState.api)
-            await appState.refreshUnreadNotificationsBySection()
         }
         .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapStored)) { _ in
             processPendingPushAfterDelay()
@@ -360,6 +359,7 @@ struct MainTabView: View {
 
             Task {
                 await appState.refreshParentLinkedStudentsContextIfNeeded()
+                await appState.registerPushNotificationsIfNeeded()
                 await promoViewModel.forceCheckPromo(api: appState.api)
                 await appState.refreshUnreadNotificationsBySection()
             }

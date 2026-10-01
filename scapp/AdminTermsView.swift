@@ -40,9 +40,7 @@ struct AdminTermsView: View {
             await viewModel.loadTerms(api: appState.api)
         }
         .task {
-            if viewModel.terms.isEmpty {
-                await viewModel.loadTerms(api: appState.api)
-            }
+            await viewModel.loadTerms(api: appState.api)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -75,7 +73,7 @@ struct AdminTermsView: View {
 
     private var contentSection: some View {
         Section("Список") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.terms.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")
@@ -178,7 +176,7 @@ struct AdminTermRowView: View {
                     .font(.subheadline)
                     .foregroundStyle(AppTheme.muted)
 
-                Text("\(term.starts_at) — \(term.ends_at)")
+                Text(AppDateFormatter.range(term.starts_at, term.ends_at))
                     .font(.caption)
                     .foregroundStyle(AppTheme.control)
             }

@@ -448,7 +448,9 @@ struct TeacherTermDTO: Decodable, Identifiable, Hashable {
     }
 
     var dateRangeTitle: String {
-        "\(starts_at ?? "дата начала не указана") — \(ends_at ?? "дата окончания не указана")"
+        let from = starts_at.map(AppDateFormatter.date) ?? "дата начала не указана"
+        let to = ends_at.map(AppDateFormatter.date) ?? "дата окончания не указана"
+        return "\(from) — \(to)"
     }
 
     enum CodingKeys: String, CodingKey {

@@ -571,7 +571,9 @@ struct ProfileView: View {
 
         request.httpBody = body
 
+        #if DEBUG
         print("PROFILE AVATAR UPLOAD REQUEST:", url.absoluteString)
+        #endif
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -581,8 +583,10 @@ struct ProfileView: View {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("PROFILE AVATAR RESPONSE STATUS:", httpResponse.statusCode)
         print("PROFILE AVATAR RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()
@@ -620,10 +624,14 @@ struct ProfileView: View {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("PROFILE REQUEST:", method, url.absoluteString)
             print("PROFILE BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("PROFILE REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -634,8 +642,10 @@ struct ProfileView: View {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("PROFILE RESPONSE STATUS:", httpResponse.statusCode)
         print("PROFILE RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()
@@ -1572,20 +1582,3 @@ enum ProfileError: LocalizedError {
     }
 }
 
-private extension String {
-    var formattedDate: String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        guard let date = formatter.date(from: self) else {
-            return self
-        }
-
-        let displayFormatter = DateFormatter()
-        displayFormatter.dateStyle = .short
-        displayFormatter.timeStyle = .short
-        displayFormatter.locale = Locale(identifier: "ru_RU")
-
-        return displayFormatter.string(from: date)
-    }
-}

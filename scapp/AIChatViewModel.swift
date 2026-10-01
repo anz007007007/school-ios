@@ -1256,7 +1256,9 @@ final class AIChatViewModel: ObservableObject {
         request.applyMobileClientHeaders()
         request.httpBody = try JSONEncoder().encode(body)
 
+        #if DEBUG
         print("\(logPrefix) REQUEST:", method, url.absoluteString)
+        #endif
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -1266,8 +1268,10 @@ final class AIChatViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("\(logPrefix) RESPONSE STATUS:", httpResponse.statusCode)
         print("\(logPrefix) RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

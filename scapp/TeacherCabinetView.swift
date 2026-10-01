@@ -56,7 +56,7 @@ struct TeacherCabinetView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.isLoading {
+                if viewModel.isLoading && viewModel.classes.isEmpty {
                     VStack(spacing: 16) {
                         ProgressView()
 
@@ -83,7 +83,7 @@ struct TeacherCabinetView: View {
             .navigationTitle(appState.isAdmin ? "Журнал школы" : "Кабинет учителя")
             .navigationBarTitleDisplayMode(.large)
             .task {
-                await viewModel.loadInitialDataIfNeeded(api: appState.api)
+                await viewModel.loadAll(api: appState.api)
 
                 filterClassID = viewModel.selectedClassID != 0
                     ? viewModel.selectedClassID
@@ -94,6 +94,11 @@ struct TeacherCabinetView: View {
                     : (viewModel.subjects.first?.id ?? 0)
 
                 filterDate = viewModel.selectedJournalDate
+            }
+            .onChange(of: appState.tabReselectToken[.teacher]) {
+                Task {
+                    await viewModel.loadAll(api: appState.api)
+                }
             }
             .refreshable {
                 await viewModel.loadAll(api: appState.api)
@@ -1115,7 +1120,7 @@ struct TeacherCabinetView: View {
                     ForEach(viewModel.attendance) { item in
                         TeacherInfoCard(
                             title: item.student_name,
-                            subtitle: "\(item.class_name) · \(item.attendance_date) · \(attendanceStatusTitle(item.status))",
+                            subtitle: "\(item.class_name) · \(AppDateFormatter.date(item.attendance_date)) · \(attendanceStatusTitle(item.status))",
                             icon: attendanceIcon(item.status)
                         )
                     }
@@ -1633,7 +1638,7 @@ struct TeacherQuickGradeSheet: View {
                         .font(.title2)
                         .fontWeight(.bold)
 
-                    Text("\(draft.subjectName) · \(draft.date)")
+                    Text("\(draft.subjectName) · \(AppDateFormatter.date(draft.date))")
                         .foregroundStyle(.secondary)
                 }
 
@@ -1850,7 +1855,7 @@ struct TeacherHomeworkCardView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    Text(shortDateTitle(item.due_date))
+                    Text(AppDateFormatter.date(item.due_date))
                         .font(.subheadline)
                         .fontWeight(.bold)
                         .foregroundStyle(dueDateColor(item.due_date))
@@ -1868,7 +1873,7 @@ struct TeacherHomeworkCardView: View {
                 }
 
                 if let createdAt = item.created_at, !createdAt.isEmpty {
-                    Label("Создано: \(createdAt)", systemImage: "clock")
+                    Label("Создано: \(AppDateFormatter.dateTime(createdAt))", systemImage: "clock")
                 }
 
                 Label("ID: \(item.id)", systemImage: "number")
@@ -1905,16 +1910,6 @@ struct TeacherHomeworkCardView: View {
                 .stroke(AppTheme.border.opacity(0.65), lineWidth: 1)
         )
         .shadow(color: AppTheme.accentDark.opacity(0.06), radius: 10, x: 0, y: 5)
-    }
-
-    private func shortDateTitle(_ value: String) -> String {
-        let parts = value.split(separator: "-")
-
-        if parts.count == 3 {
-            return "\(parts[2]).\(parts[1]).\(parts[0])"
-        }
-
-        return value
     }
 
     private func dueDateColor(_ value: String) -> Color {
@@ -2224,7 +2219,7 @@ struct TeacherGradeCompactRowView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(AppTheme.text)
 
-                Text("\(grade.subject_name) · \(grade.grade_date)")
+                Text("\(grade.subject_name) · \(AppDateFormatter.date(grade.grade_date))")
                     .font(.caption)
                     .foregroundStyle(AppTheme.muted)
 

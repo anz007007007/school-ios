@@ -37,7 +37,16 @@ struct FinanceView: View {
                 }
             }
             .task {
-                if appState.canUseFinance && viewModel.invoices.isEmpty && !viewModel.isLoading {
+                if appState.canUseFinance {
+                    await viewModel.loadInitialData(api: appState.api)
+                }
+            }
+            .onChange(of: appState.tabReselectToken[.finance]) {
+                guard appState.canUseFinance else {
+                    return
+                }
+
+                Task {
                     await viewModel.loadInitialData(api: appState.api)
                 }
             }
@@ -510,7 +519,7 @@ struct FinanceView: View {
 
     private var invoicesSection: some View {
         Section("Счета") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.invoices.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка счетов...")
@@ -732,7 +741,7 @@ struct InvoiceRowView: View {
                     .clipShape(Capsule())
 
                 if let dueDate = invoice.due_date {
-                    Label(dueDate, systemImage: "calendar")
+                    Label(AppDateFormatter.date(dueDate), systemImage: "calendar")
                         .font(.caption)
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -791,7 +800,7 @@ struct PaymentRowView: View {
 
             HStack {
                 if let paymentDate = payment.payment_date {
-                    Label(paymentDate, systemImage: "calendar")
+                    Label(AppDateFormatter.date(paymentDate), systemImage: "calendar")
                 }
 
                 if let comment = payment.comment, !comment.isEmpty {
@@ -918,11 +927,11 @@ struct InvoiceDetailView: View {
 
                                 HStack {
                                     if let dateFrom = item.date_from {
-                                        Label(dateFrom, systemImage: "calendar")
+                                        Label(AppDateFormatter.date(dateFrom), systemImage: "calendar")
                                     }
 
                                     if let dateTo = item.date_to {
-                                        Text("— \(dateTo)")
+                                        Text("— \(AppDateFormatter.date(dateTo))")
                                     }
                                 }
                                 .font(.caption)
@@ -939,19 +948,19 @@ struct InvoiceDetailView: View {
                     }
 
                     if let dueDate = invoice.due_date {
-                        LabeledContent("Срок оплаты", value: dueDate)
+                        LabeledContent("Срок оплаты", value: AppDateFormatter.date(dueDate))
                     }
 
                     if let period = invoice.period {
-                        LabeledContent("Период", value: period)
+                        LabeledContent("Период", value: AppDateFormatter.monthYear(period))
                     }
 
                     if let start = invoice.period_starts_at {
-                        LabeledContent("Начало периода", value: start)
+                        LabeledContent("Начало периода", value: AppDateFormatter.date(start))
                     }
 
                     if let end = invoice.period_ends_at {
-                        LabeledContent("Конец периода", value: end)
+                        LabeledContent("Конец периода", value: AppDateFormatter.date(end))
                     }
 
                     if let invoiceType = invoice.invoice_type {
@@ -987,11 +996,11 @@ struct InvoiceDetailView: View {
                     LabeledContent("Статус", value: invoice.status)
 
                     if let createdAt = invoice.created_at {
-                        LabeledContent("Создан", value: createdAt)
+                        LabeledContent("Создан", value: AppDateFormatter.dateTime(createdAt))
                     }
 
                     if let updatedAt = invoice.updated_at {
-                        LabeledContent("Обновлён", value: updatedAt)
+                        LabeledContent("Обновлён", value: AppDateFormatter.dateTime(updatedAt))
                     }
                 }
             }

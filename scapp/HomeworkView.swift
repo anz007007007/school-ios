@@ -29,9 +29,14 @@ struct HomeworkView: View {
                 await viewModel.loadInitialData(api: appState.api)
             }
             .task {
-                await appState.markNotificationsReadForRoute(.homework(notificationID: nil))
+                Task {
+                    await appState.markNotificationsReadForRoute(.homework(notificationID: nil))
+                }
 
-                if viewModel.items.isEmpty {
+                await viewModel.loadInitialData(api: appState.api)
+            }
+            .onChange(of: appState.tabReselectToken[.homework]) {
+                Task {
                     await viewModel.loadInitialData(api: appState.api)
                 }
             }
@@ -348,7 +353,7 @@ struct HomeworkView: View {
 
     private var homeworkSection: some View {
         Section("Задания") {
-            if viewModel.isLoading || !viewModel.hasLoadedInitialData {
+            if viewModel.isLoading && !viewModel.hasLoadedInitialData {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")
@@ -594,7 +599,7 @@ struct HomeworkRowView: View {
                 HStack {
                     Label(item.class_name, systemImage: "rectangle.3.group.fill")
                     Spacer()
-                    Label(item.due_date, systemImage: "calendar")
+                    Label(AppDateFormatter.date(item.due_date), systemImage: "calendar")
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -732,7 +737,7 @@ struct HomeworkDetailView: View {
                 Section("Информация") {
                     LabeledContent("Класс", value: homework.class_name)
                     LabeledContent("Предмет", value: homework.subject_name)
-                    LabeledContent("Срок", value: homework.due_date)
+                    LabeledContent("Срок", value: AppDateFormatter.date(homework.due_date))
                     LabeledContent("Статус срока", value: deadlineTitle)
                     LabeledContent("Выполнение", value: homework.isCompleted ? "Выполнено" : "Не выполнено")
 
@@ -741,7 +746,7 @@ struct HomeworkDetailView: View {
                     }
 
                     if let completedAt = homework.completed_at, homework.isCompleted {
-                        LabeledContent("Выполнено в", value: completedAt)
+                        LabeledContent("Выполнено в", value: AppDateFormatter.dateTime(completedAt))
                     }
 
                     LabeledContent("ID задания", value: "\(homework.id)")

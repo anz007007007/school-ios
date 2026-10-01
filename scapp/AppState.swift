@@ -356,8 +356,8 @@ final class AppState: ObservableObject {
     @Published var pushNotificationsFeatureEnabled = true
     @Published var pushRoute: PushRoute?
     @Published var didTryRestoreSession = false
-    @Published var parentLinkedStudentsDataVersion = UUID()
     @Published private(set) var unreadNotificationsBySection: [String: Int] = [:]
+    @Published private(set) var tabReselectToken: [MainTabSelection: Int] = [:]
 
     let api = SchoolAPI(
         baseURL: URL(string: "https://sc.it-status.ru/")!
@@ -508,14 +508,12 @@ final class AppState: ObservableObject {
         Task {
             await markPushNotificationReadIfNeeded(route.notificationID)
             await markNotificationsReadForRoute(route)
-            await refreshUnreadNotificationsBySection()
         }
     }
 
     func markPushNotificationReadIfNeeded(_ notificationID: Int?) async {
         guard let notificationID else {
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
-            await refreshUnreadNotificationsBySection()
             return
         }
 
@@ -528,13 +526,11 @@ final class AppState: ObservableObject {
             )
 
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
-            await refreshUnreadNotificationsBySection()
         } catch {
             #if DEBUG
             print("PUSH NOTIFICATION READ FROM ROUTE ERROR:", error.localizedDescription)
             #endif
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
-            await refreshUnreadNotificationsBySection()
         }
     }
 
@@ -545,7 +541,6 @@ final class AppState: ObservableObject {
 
         guard route.sectionKey != "notifications" else {
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
-            await refreshUnreadNotificationsBySection()
             return
         }
 
@@ -587,27 +582,30 @@ final class AppState: ObservableObject {
 
             guard !unreadItems.isEmpty else {
                 await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
-                await refreshUnreadNotificationsBySection()
                 return
             }
 
-            for item in unreadItems {
-                _ = try await APIRequestService.shared.request(
-                    api: api,
-                    path: "/api/v1/push/notifications/\(item.id)/read",
-                    method: "PATCH",
-                    logPrefix: "PUSH SECTION NOTIFICATION READ"
-                )
+            let currentAPI = api
+
+            await withTaskGroup(of: Void.self) { group in
+                for item in unreadItems {
+                    group.addTask {
+                        _ = try? await APIRequestService.shared.request(
+                            api: currentAPI,
+                            path: "/api/v1/push/notifications/\(item.id)/read",
+                            method: "PATCH",
+                            logPrefix: "PUSH SECTION NOTIFICATION READ"
+                        )
+                    }
+                }
             }
 
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
-            await refreshUnreadNotificationsBySection()
         } catch {
             #if DEBUG
             print("PUSH SECTION NOTIFICATIONS READ ERROR:", error.localizedDescription)
             #endif
             await PushNotificationService.shared.refreshBadgeAfterNotificationStateChange(api: api)
-            await refreshUnreadNotificationsBySection()
         }
     }
 
@@ -655,8 +653,6 @@ final class AppState: ObservableObject {
 
             await refreshMobileConfigFeatures()
             await refreshUnreadNotificationsBySection()
-
-            await registerPushNotificationsIfNeeded()
         } catch {
             if isUnauthorizedError(error) {
                 handleSessionExpired()
@@ -666,16 +662,28 @@ final class AppState: ObservableObject {
         }
     }
 
+    private var lastParentContextRefreshDate = Date.distantPast
+
     func refreshParentLinkedStudentsContextIfNeeded() async {
         guard isAuthenticated, isParent else {
             return
         }
 
+        guard Date().timeIntervalSince(lastParentContextRefreshDate) > 300 else {
+            return
+        }
+
+        lastParentContextRefreshDate = Date()
+
         await refreshCurrentUser()
-        parentLinkedStudentsDataVersion = UUID()
     }
 
-    private func registerPushNotificationsIfNeeded() async {
+    /// Bumped when the user taps a tab that's already selected, so that screen can do a quiet refresh.
+    func bumpTabReselectToken(for tab: MainTabSelection) {
+        tabReselectToken[tab, default: 0] += 1
+    }
+
+    func registerPushNotificationsIfNeeded() async {
         guard isAuthenticated else {
             return
         }
@@ -734,7 +742,6 @@ final class AppState: ObservableObject {
         currentUser = nil
         errorMessage = nil
         pushNotificationsFeatureEnabled = true
-        parentLinkedStudentsDataVersion = UUID()
         unreadNotificationsBySection = [:]
     }
 
@@ -746,7 +753,6 @@ final class AppState: ObservableObject {
         isAuthenticated = false
         currentUser = nil
         pushNotificationsFeatureEnabled = true
-        parentLinkedStudentsDataVersion = UUID()
         unreadNotificationsBySection = [:]
         errorMessage = "Сессия истекла. Войдите снова."
     }

@@ -41,11 +41,7 @@ struct DocumentsView: View {
                 await viewModel.loadInitialData(api: appState.api)
             }
             .task {
-                if viewModel.profiles.isEmpty
-                    && viewModel.generatedDocuments.isEmpty
-                    && viewModel.publicDocuments.isEmpty {
-                    await viewModel.loadInitialData(api: appState.api)
-                }
+                await viewModel.loadInitialData(api: appState.api)
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -386,7 +382,7 @@ struct DocumentsView: View {
 
     private var profilesSection: some View {
         Section("Профили учеников") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.profiles.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")
@@ -607,7 +603,7 @@ struct GeneratedDocumentRowView: View {
                 Spacer()
 
                 if let generatedAt = document.generated_at {
-                    Text(generatedAt)
+                    Text(AppDateFormatter.dateTime(generatedAt))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -644,7 +640,7 @@ struct PublicDocumentRowView: View {
                     .foregroundStyle(.blue)
 
                 if let createdAt = document.created_at {
-                    Text(createdAt)
+                    Text(AppDateFormatter.dateTime(createdAt))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -802,7 +798,7 @@ struct GeneratedDocumentDetailView: View {
                         }
 
                         if let generatedAt = document.generated_at {
-                            Label(generatedAt, systemImage: "calendar")
+                            Label(AppDateFormatter.dateTime(generatedAt), systemImage: "calendar")
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -874,7 +870,7 @@ struct PublicDocumentDetailView: View {
                             .fontWeight(.bold)
 
                         if let createdAt = document.created_at {
-                            Label(createdAt, systemImage: "calendar")
+                            Label(AppDateFormatter.dateTime(createdAt), systemImage: "calendar")
                                 .foregroundStyle(.secondary)
                         }
                     }

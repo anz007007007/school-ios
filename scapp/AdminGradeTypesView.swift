@@ -32,7 +32,7 @@ struct AdminGradeTypesView: View {
             }
 
             Section("Список") {
-                if viewModel.isLoading {
+                if viewModel.isLoading && viewModel.items.isEmpty {
                     HStack {
                         Spacer()
                         ProgressView("Загрузка...")
@@ -82,9 +82,7 @@ struct AdminGradeTypesView: View {
             await viewModel.loadItems(api: appState.api)
         }
         .task {
-            if viewModel.items.isEmpty {
-                await viewModel.loadItems(api: appState.api)
-            }
+            await viewModel.loadItems(api: appState.api)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

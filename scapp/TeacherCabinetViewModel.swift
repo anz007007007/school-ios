@@ -50,8 +50,6 @@ final class TeacherCabinetViewModel: ObservableObject {
     @Published var successMessage: String?
     @Published var attendanceWarningMessage: String?
 
-    private var didLoadInitialData = false
-
     enum HomeworkDateFilter: String, CaseIterable, Identifiable {
         case today = "Сегодня"
         case tomorrow = "Завтра"
@@ -399,23 +397,17 @@ final class TeacherCabinetViewModel: ObservableObject {
         access?.resolvedCanManageFinalGrades ?? false
     }
 
-    func loadInitialDataIfNeeded(api: SchoolAPI) async {
-        guard !didLoadInitialData else {
-            return
-        }
-
-        didLoadInitialData = true
-        await loadAll(api: api)
-    }
-
     func loadAll(api: SchoolAPI) async {
         isLoading = true
         errorMessage = nil
         successMessage = nil
 
-        await loadClasses(api: api)
-        await loadSubjects(api: api)
-        await loadGradeTypes(api: api)
+        async let classesTask: Void = loadClasses(api: api)
+        async let subjectsTask: Void = loadSubjects(api: api)
+        async let gradeTypesTask: Void = loadGradeTypes(api: api)
+        async let scheduleTask: Void = loadSchedule(api: api)
+
+        _ = await (classesTask, subjectsTask, gradeTypesTask, scheduleTask)
 
         if selectedClassID == 0 {
             selectedClassID = classes.first?.id ?? 0
@@ -433,10 +425,12 @@ final class TeacherCabinetViewModel: ObservableObject {
             gradesSelectedSubjectID = selectedSubjectID
         }
 
-        await loadAccess(api: api)
-        await loadStudents(api: api)
-        await loadGrades(api: api)
-        await loadTerms(api: api)
+        async let accessTask: Void = loadAccess(api: api)
+        async let studentsTask: Void = loadStudents(api: api)
+        async let gradesTask: Void = loadGrades(api: api)
+        async let termsTask: Void = loadTerms(api: api)
+
+        _ = await (accessTask, studentsTask, gradesTask, termsTask)
 
         if finalGradesSelectedTermID == 0 {
             finalGradesSelectedTermID = terms.first(where: { $0.is_active == true })?.id
@@ -444,7 +438,6 @@ final class TeacherCabinetViewModel: ObservableObject {
                 ?? 0
         }
         await loadGradebook(api: api)
-        await loadSchedule(api: api)
 
         isLoading = false
     }
@@ -467,10 +460,13 @@ final class TeacherCabinetViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
 
-        await loadAccess(api: api)
-        await loadStudents(api: api)
-        await loadGradeTypes(api: api)
-        await loadGrades(api: api)
+        async let accessTask: Void = loadAccess(api: api)
+        async let studentsTask: Void = loadStudents(api: api)
+        async let gradeTypesTask: Void = loadGradeTypes(api: api)
+        async let gradesTask: Void = loadGrades(api: api)
+
+        _ = await (accessTask, studentsTask, gradeTypesTask, gradesTask)
+
         await loadGradebook(api: api)
 
         isLoading = false
@@ -2116,10 +2112,14 @@ final class TeacherCabinetViewModel: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("TEACHER REQUEST:", method, url.absoluteString)
             print("TEACHER BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("TEACHER REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -2130,8 +2130,10 @@ final class TeacherCabinetViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("TEACHER RESPONSE STATUS:", httpResponse.statusCode)
         print("TEACHER RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

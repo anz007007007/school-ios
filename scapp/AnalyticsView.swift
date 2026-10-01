@@ -58,9 +58,7 @@ struct AnalyticsView: View {
                 await viewModel.loadAll(api: appState.api)
             }
             .task {
-                if viewModel.dashboard == nil && !viewModel.isLoading {
-                    await viewModel.loadAll(api: appState.api)
-                }
+                await viewModel.loadAll(api: appState.api)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

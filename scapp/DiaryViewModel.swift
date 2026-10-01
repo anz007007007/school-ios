@@ -200,8 +200,8 @@ final class DiaryViewModel: ObservableObject {
             return "Все даты"
         }
 
-        let from = Self.dateFormatter.string(from: range.start)
-        let to = Self.dateFormatter.string(from: range.end)
+        let from = AppDateFormatter.date(range.start)
+        let to = AppDateFormatter.date(range.end)
 
         if from == to {
             return from
@@ -262,6 +262,18 @@ final class DiaryViewModel: ObservableObject {
         }
     }
 
+    private func loadDiaryFiltersIfNeeded(api: SchoolAPI) async {
+        if diaryFilters == nil {
+            await loadDiaryFilters(api: api)
+        }
+    }
+
+    private func loadGradeTypesIfNeeded(api: SchoolAPI) async {
+        if gradeTypes.isEmpty {
+            await loadGradeTypes(api: api)
+        }
+    }
+
     func loadGrades(api: SchoolAPI) async {
         let generation = UUID()
         loadGeneration = generation
@@ -272,15 +284,12 @@ final class DiaryViewModel: ObservableObject {
         calculatedGradesBySubjectID = [:]
         isLoadingCalculatedGrades = false
 
-        if diaryFilters == nil {
-            await loadDiaryFilters(api: api)
-        }
+        async let filtersTask: Void = loadDiaryFiltersIfNeeded(api: api)
+        async let gradeTypesPreloadTask: Void = loadGradeTypesIfNeeded(api: api)
+
+        _ = await (filtersTask, gradeTypesPreloadTask)
 
         selectDefaultStudentIfNeeded()
-
-        if gradeTypes.isEmpty {
-            await loadGradeTypes(api: api)
-        }
 
         do {
             var queryItems: [URLQueryItem] = []

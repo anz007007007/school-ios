@@ -401,23 +401,7 @@ struct AITeacherCommandDTO: Codable, Identifiable, Equatable {
     }
 
     private func formatDate(_ value: String?) -> String {
-        guard let value, !value.isEmpty else {
-            return "—"
-        }
-
-        let inputFormatter = DateFormatter()
-        inputFormatter.dateFormat = "yyyy-MM-dd"
-        inputFormatter.locale = Locale(identifier: "ru_RU")
-
-        guard let date = inputFormatter.date(from: value) else {
-            return value
-        }
-
-        let outputFormatter = DateFormatter()
-        outputFormatter.dateFormat = "dd.MM.yyyy"
-        outputFormatter.locale = Locale(identifier: "ru_RU")
-
-        return outputFormatter.string(from: date)
+        AppDateFormatter.date(value)
     }
 }
 

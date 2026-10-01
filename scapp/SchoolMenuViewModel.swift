@@ -631,10 +631,14 @@ final class SchoolMenuViewModel: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("MENU REQUEST:", method, url.absoluteString)
             print("MENU BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("MENU REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -645,8 +649,10 @@ final class SchoolMenuViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("MENU RESPONSE STATUS:", httpResponse.statusCode)
         print("MENU RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

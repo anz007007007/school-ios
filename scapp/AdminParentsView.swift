@@ -40,9 +40,7 @@ struct AdminParentsView: View {
             await viewModel.loadParents(api: appState.api)
         }
         .task {
-            if viewModel.parents.isEmpty {
-                await viewModel.loadParents(api: appState.api)
-            }
+            await viewModel.loadParents(api: appState.api)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -75,7 +73,7 @@ struct AdminParentsView: View {
 
     private var contentSection: some View {
         Section("Список") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.parents.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

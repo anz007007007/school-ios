@@ -51,21 +51,17 @@ struct MessagesView: View {
                 await viewModel.loadInitialData(api: appState.api)
             }
             .task {
-                await appState.markNotificationsReadForRoute(.messages(notificationID: nil))
+                Task {
+                    await appState.markNotificationsReadForRoute(.messages(notificationID: nil))
+                }
                 PushNotificationService.shared.clearLatestRemoteNotification()
 
                 viewModel.currentUserID = appState.currentUser?.id
 
-                if viewModel.messages.isEmpty {
-                    await viewModel.loadInitialData(api: appState.api)
-                }
+                await viewModel.loadInitialData(api: appState.api)
             }
-            .onAppear {
+            .onChange(of: appState.tabReselectToken[.messages]) {
                 Task {
-                    await appState.markNotificationsReadForRoute(.messages(notificationID: nil))
-                    PushNotificationService.shared.clearLatestRemoteNotification()
-
-                    viewModel.currentUserID = appState.currentUser?.id
                     await viewModel.loadInitialData(api: appState.api)
                 }
             }
@@ -329,7 +325,7 @@ struct MessagesView: View {
 
     private var messagesSection: some View {
         Section("Письма") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.messages.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

@@ -44,7 +44,10 @@ struct SchoolMenuView: View {
                     await viewModel.loadInitialData(api: appState.api)
                 }
                 .task {
-                    if viewModel.weekItems.isEmpty && viewModel.dishes.isEmpty {
+                    await viewModel.loadInitialData(api: appState.api)
+                }
+                .onChange(of: appState.tabReselectToken[.menu]) {
+                    Task {
                         await viewModel.loadInitialData(api: appState.api)
                     }
                 }
@@ -379,7 +382,7 @@ struct SchoolMenuView: View {
 
     private var selectedDaySection: some View {
         Section(viewModel.selectedDate.isEmpty ? "День" : viewModel.dayTitle(viewModel.selectedDate)) {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.weekItems.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

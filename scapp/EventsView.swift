@@ -43,19 +43,23 @@ struct EventsView: View {
             .onSubmit(of: .search) {
                 Task {
                     await viewModel.reloadForFilters(api: appState.api)
+                }
+                Task {
                     await markEventsNotificationsRead()
                 }
             }
             .refreshable {
                 await viewModel.loadInitialData(api: appState.api)
-                await markEventsNotificationsRead()
+                Task {
+                    await markEventsNotificationsRead()
+                }
             }
             .task {
-                if viewModel.events.isEmpty {
-                    await viewModel.loadInitialData(api: appState.api)
-                }
+                await viewModel.loadInitialData(api: appState.api)
 
-                await markEventsNotificationsRead()
+                Task {
+                    await markEventsNotificationsRead()
+                }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -237,7 +241,6 @@ struct EventsView: View {
 
     private func markEventsNotificationsRead() async {
         await appState.markNotificationsReadForRoute(.events(notificationID: nil))
-        await appState.refreshUnreadNotificationsBySection()
     }
 
     private var selectedStudentName: String? {
@@ -404,7 +407,7 @@ struct EventsView: View {
 
     private var timelineSection: some View {
         Section("Таймлайн") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.events.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")
@@ -832,7 +835,7 @@ struct EventDetailView: View {
                 Section("Система") {
                     LabeledContent("ID события", value: "\(event.id)")
                     LabeledContent("Тип", value: event.event_type)
-                    LabeledContent("Дата сервера", value: event.starts_at)
+                    LabeledContent("Дата сервера", value: AppDateFormatter.dateTime(event.starts_at))
                 }
             }
             .appThemedList()

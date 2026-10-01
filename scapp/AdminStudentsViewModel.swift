@@ -72,8 +72,10 @@ final class AdminStudentsViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
 
-        await loadClasses(api: api)
-        await loadStudents(api: api, showLoading: false)
+        async let classesTask: Void = loadClasses(api: api)
+        async let studentsTask: Void = loadStudents(api: api, showLoading: false)
+
+        _ = await (classesTask, studentsTask)
 
         isLoading = false
     }
@@ -316,10 +318,14 @@ final class AdminStudentsViewModel: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("ADMIN STUDENTS REQUEST:", method, url.absoluteString)
             print("ADMIN STUDENTS BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("ADMIN STUDENTS REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -330,8 +336,10 @@ final class AdminStudentsViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("ADMIN STUDENTS RESPONSE STATUS:", httpResponse.statusCode)
         print("ADMIN STUDENTS RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

@@ -45,7 +45,7 @@ struct DiaryAcademicTermDTO: Decodable, Identifiable, Hashable {
     }
 
     var displayRangeText: String {
-        "\(starts_at) — \(ends_at)"
+        AppDateFormatter.range(starts_at, ends_at)
     }
 
     var isQuarter: Bool {

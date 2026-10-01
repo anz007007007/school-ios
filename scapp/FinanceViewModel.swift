@@ -1391,10 +1391,14 @@ final class FinanceViewModel: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("FINANCE REQUEST:", method, url.absoluteString)
             print("FINANCE BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("FINANCE REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -1405,8 +1409,10 @@ final class FinanceViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("FINANCE RESPONSE STATUS:", httpResponse.statusCode)
         print("FINANCE RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

@@ -40,9 +40,17 @@ struct ScheduleView: View {
                 )
             }
             .task {
-                await appState.markNotificationsReadForRoute(.schedule(notificationID: nil))
+                Task {
+                    await appState.markNotificationsReadForRoute(.schedule(notificationID: nil))
+                }
 
-                if viewModel.lessons.isEmpty {
+                await viewModel.loadInitialData(
+                    api: appState.api,
+                    teacherOnly: teacherOnlySchedule
+                )
+            }
+            .onChange(of: appState.tabReselectToken[.schedule]) {
+                Task {
                     await viewModel.loadInitialData(
                         api: appState.api,
                         teacherOnly: teacherOnlySchedule
@@ -170,7 +178,7 @@ struct ScheduleView: View {
 
     private var scheduleSection: some View {
         Section(sectionTitle) {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.lessons.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

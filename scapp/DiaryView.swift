@@ -30,10 +30,15 @@ struct DiaryView: View {
                 await viewModel.loadGrades(api: appState.api)
             }
             .task {
-                await appState.markNotificationsReadForRoute(.diary(notificationID: nil))
+                Task {
+                    await appState.markNotificationsReadForRoute(.diary(notificationID: nil))
+                }
                 PushNotificationService.shared.clearLatestRemoteNotification()
 
-                if viewModel.grades.isEmpty {
+                await viewModel.loadGrades(api: appState.api)
+            }
+            .onChange(of: appState.tabReselectToken[.diary]) {
+                Task {
                     await viewModel.loadGrades(api: appState.api)
                 }
             }
@@ -516,7 +521,7 @@ struct DiaryView: View {
 
     private var detailsSection: some View {
         Section("Подробно") {
-            if viewModel.isLoading || !viewModel.hasLoadedOnce {
+            if viewModel.isLoading && !viewModel.hasLoadedOnce {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")
@@ -675,7 +680,7 @@ struct DiaryGradeRowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text(grade.grade_date)
+                Text(AppDateFormatter.date(grade.grade_date))
                     .font(.caption)
                     .foregroundStyle(.blue)
 
@@ -746,7 +751,7 @@ struct DiaryGradeDetailsSheetView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
 
-                            Text(grade.grade_date)
+                            Text(AppDateFormatter.date(grade.grade_date))
                                 .font(.caption)
                                 .foregroundStyle(.blue)
                         }
@@ -759,7 +764,7 @@ struct DiaryGradeDetailsSheetView: View {
                     detailRow(title: "Предмет", value: grade.subject_name)
                     detailRow(title: "Ученик", value: grade.student_name)
                     detailRow(title: "Класс", value: grade.class_name)
-                    detailRow(title: "Дата", value: grade.grade_date)
+                    detailRow(title: "Дата", value: AppDateFormatter.date(grade.grade_date))
 
                     if let weight = grade.gradeWeightText {
                         detailRow(title: "Вес", value: weight)

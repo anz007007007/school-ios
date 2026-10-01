@@ -40,9 +40,7 @@ struct AdminTeachersView: View {
             await viewModel.loadTeachers(api: appState.api)
         }
         .task {
-            if viewModel.teachers.isEmpty {
-                await viewModel.loadTeachers(api: appState.api)
-            }
+            await viewModel.loadTeachers(api: appState.api)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -75,7 +73,7 @@ struct AdminTeachersView: View {
 
     private var contentSection: some View {
         Section("Список") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.teachers.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

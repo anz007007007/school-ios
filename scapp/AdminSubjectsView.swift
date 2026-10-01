@@ -31,9 +31,7 @@ struct AdminSubjectsView: View {
             await viewModel.loadSubjects(api: appState.api)
         }
         .task {
-            if viewModel.subjects.isEmpty {
-                await viewModel.loadSubjects(api: appState.api)
-            }
+            await viewModel.loadSubjects(api: appState.api)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -66,7 +64,7 @@ struct AdminSubjectsView: View {
 
     private var contentSection: some View {
         Section("Список") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.subjects.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

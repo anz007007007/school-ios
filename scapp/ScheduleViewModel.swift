@@ -500,7 +500,9 @@ final class ScheduleViewModel: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.applyMobileClientHeaders()
 
+        #if DEBUG
         print("SCHEDULE REQUEST:", method, url.absoluteString)
+        #endif
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -510,8 +512,10 @@ final class ScheduleViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("SCHEDULE RESPONSE STATUS:", httpResponse.statusCode)
         print("SCHEDULE RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

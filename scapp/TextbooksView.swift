@@ -39,7 +39,7 @@ struct TextbooksView: View {
             filtersSection
 
             Section("Материалы") {
-                if viewModel.isLoading {
+                if viewModel.isLoading && viewModel.items.isEmpty {
                     HStack {
                         Spacer()
                         ProgressView("Загрузка учебников...")
@@ -84,9 +84,7 @@ struct TextbooksView: View {
             await viewModel.refresh(api: appState.api)
         }
         .task {
-            if viewModel.items.isEmpty {
-                await viewModel.loadInitialData(api: appState.api)
-            }
+            await viewModel.loadInitialData(api: appState.api)
         }
         .toolbar {
             if canManage {

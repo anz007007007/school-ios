@@ -703,10 +703,14 @@ final class EventsViewModel: ObservableObject {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+            #if DEBUG
             print("EVENTS REQUEST:", method, url.absoluteString)
             print("EVENTS BODY:", body)
+            #endif
         } else {
+            #if DEBUG
             print("EVENTS REQUEST:", method, url.absoluteString)
+            #endif
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -717,8 +721,10 @@ final class EventsViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("EVENTS RESPONSE STATUS:", httpResponse.statusCode)
         print("EVENTS RESPONSE BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

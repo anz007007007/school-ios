@@ -68,8 +68,10 @@ final class TextbooksViewModel: ObservableObject {
         errorMessage = nil
         successMessage = nil
 
-        await loadFilters(api: api)
-        await loadItems(api: api)
+        async let filtersTask: Void = loadFilters(api: api)
+        async let itemsTask: Void = loadItems(api: api)
+
+        _ = await (filtersTask, itemsTask)
 
         isLoading = false
     }

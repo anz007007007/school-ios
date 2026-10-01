@@ -191,11 +191,11 @@ final class DashboardViewModel: ObservableObject {
     var currentQuarterTitle: String {
         if let currentTerm = diaryFilters?.current_term,
            currentTerm.isQuarter {
-            return "\(currentTerm.name): \(currentTerm.starts_at) — \(currentTerm.ends_at)"
+            return "\(currentTerm.name): \(currentTerm.displayRangeText)"
         }
 
         if let currentYear = diaryFilters?.current_year {
-            return "\(currentYear.name): \(currentYear.starts_at) — \(currentYear.ends_at)"
+            return "\(currentYear.name): \(currentYear.displayRangeText)"
         }
 
         return "текущий период"
@@ -768,7 +768,9 @@ final class DashboardViewModel: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.applyMobileClientHeaders()
 
+        #if DEBUG
         print("DASHBOARD REQUEST:", method, url.absoluteString)
+        #endif
 
         let data: Data
         let response: URLResponse
@@ -789,7 +791,9 @@ final class DashboardViewModel: ObservableObject {
 
         let responseText = String(data: data, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("DASHBOARD RESPONSE STATUS:", httpResponse.statusCode, "BYTES:", data.count)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

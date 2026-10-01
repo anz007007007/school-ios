@@ -445,7 +445,9 @@ final class CommunityViewModel: ObservableObject {
         let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
         let fileSize = values.fileSize ?? 0
 
+        #if DEBUG
         print("COMMUNITY IMAGE UPLOAD FILE SIZE:", fileSize)
+        #endif
 
         guard fileSize > 0 else {
             throw APIRequestError.networkError("Файл пустой.")
@@ -488,7 +490,9 @@ final class CommunityViewModel: ObservableObject {
             try? FileManager.default.removeItem(at: multipartFileURL)
         }
 
+        #if DEBUG
         print("COMMUNITY IMAGE UPLOAD REQUEST:", url.absoluteString)
+        #endif
 
         let (responseData, response) = try await URLSession.shared.upload(
             for: request,
@@ -501,8 +505,10 @@ final class CommunityViewModel: ObservableObject {
 
         let responseText = String(data: responseData, encoding: .utf8) ?? ""
 
+        #if DEBUG
         print("COMMUNITY IMAGE UPLOAD STATUS:", httpResponse.statusCode)
         print("COMMUNITY IMAGE UPLOAD BODY:", responseText)
+        #endif
 
         if httpResponse.statusCode == 401 {
             AuthSessionEvents.notifySessionExpired()

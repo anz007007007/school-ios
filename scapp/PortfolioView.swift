@@ -16,7 +16,7 @@ struct PortfolioView: View {
     var body: some View {
         NavigationStack {
             LoadingErrorView(
-                isLoading: viewModel.isLoading,
+                isLoading: viewModel.isLoading && viewModel.portfolio == nil,
                 errorMessage: viewModel.errorMessage,
                 onRetry: {
                     Task {
@@ -570,7 +570,7 @@ struct PortfolioView: View {
     }
 
     private func formatDate(_ value: String) -> String {
-        String(value.prefix(10))
+        AppDateFormatter.dateTime(value)
     }
 
     private func nonEmpty(_ value: String?) -> String? {
@@ -799,7 +799,7 @@ private struct PortfolioBlockCard: View {
                 }
 
                 if let date = clean(block.event_date) {
-                    tag(String(date.prefix(10)))
+                    tag(AppDateFormatter.date(date))
                 }
             }
 

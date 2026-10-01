@@ -58,9 +58,7 @@ struct ClubsView: View {
                 await viewModel.loadInitialData(api: appState.api)
             }
             .task {
-                if viewModel.clubs.isEmpty {
-                    await viewModel.loadInitialData(api: appState.api)
-                }
+                await viewModel.loadInitialData(api: appState.api)
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -457,7 +455,7 @@ struct ClubsView: View {
 
     private var timelineSection: some View {
         Section("Таймлайн") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.clubs.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

@@ -59,7 +59,16 @@ struct HealthView: View {
                 }
             }
             .task {
-                if appState.canViewHealth && viewModel.cards.isEmpty {
+                if appState.canViewHealth {
+                    await viewModel.loadInitialData(api: appState.api)
+                }
+            }
+            .onChange(of: appState.tabReselectToken[.health]) {
+                guard appState.canViewHealth else {
+                    return
+                }
+
+                Task {
                     await viewModel.loadInitialData(api: appState.api)
                 }
             }
@@ -179,7 +188,7 @@ struct HealthView: View {
 
     private var cardsSection: some View {
         Section("Медкарты") {
-            if viewModel.isLoading {
+            if viewModel.isLoading && viewModel.cards.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Загрузка...")

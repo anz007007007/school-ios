@@ -55,42 +55,16 @@ struct CommunityView: View {
         .navigationTitle("Объявления")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            if viewModel.dashboard == nil && !viewModel.isLoading {
-                await viewModel.loadDashboard(api: appState.api)
-
-                if appState.isParent {
-                    await viewModel.loadMyParentAd(api: appState.api)
-                }
-
-                if appState.isAdmin || appState.isManager {
-                    await viewModel.loadAdminPromos(api: appState.api)
-                }
-            }
+            await loadCommunityData()
         }
         .refreshable {
-            await viewModel.loadDashboard(api: appState.api)
-
-            if appState.isParent {
-                await viewModel.loadMyParentAd(api: appState.api)
-            }
-
-            if appState.isAdmin || appState.isManager {
-                await viewModel.loadAdminPromos(api: appState.api)
-            }
+            await loadCommunityData()
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task {
-                        await viewModel.loadDashboard(api: appState.api)
-
-                        if appState.isParent {
-                            await viewModel.loadMyParentAd(api: appState.api)
-                        }
-
-                        if appState.isAdmin || appState.isManager {
-                            await viewModel.loadAdminPromos(api: appState.api)
-                        }
+                        await loadCommunityData()
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -238,6 +212,26 @@ struct CommunityView: View {
                 return nil
             }
             .environmentObject(appState)
+        }
+    }
+
+    private func loadCommunityData() async {
+        async let dashboardTask: Void = viewModel.loadDashboard(api: appState.api)
+        async let parentAdTask: Void = loadMyParentAdIfNeeded()
+        async let adminPromosTask: Void = loadAdminPromosIfNeeded()
+
+        _ = await (dashboardTask, parentAdTask, adminPromosTask)
+    }
+
+    private func loadMyParentAdIfNeeded() async {
+        if appState.isParent {
+            await viewModel.loadMyParentAd(api: appState.api)
+        }
+    }
+
+    private func loadAdminPromosIfNeeded() async {
+        if appState.isAdmin || appState.isManager {
+            await viewModel.loadAdminPromos(api: appState.api)
         }
     }
 

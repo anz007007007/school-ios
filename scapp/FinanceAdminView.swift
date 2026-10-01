@@ -306,7 +306,7 @@ struct FinanceAdminView: View {
     private var monthlyPreviewSection: some View {
         Section("Предпросмотр начислений") {
             if let preview = viewModel.monthlyPreview {
-                LabeledContent("Период", value: preview.billing_period ?? billingPeriod)
+                LabeledContent("Период", value: AppDateFormatter.monthYear(preview.billing_period ?? billingPeriod))
                 LabeledContent("Счетов", value: "\(preview.total_count ?? preview.items.count)")
                 LabeledContent("Итого", value: preview.total_amount ?? "—")
 
@@ -498,7 +498,7 @@ struct FinanceAdminView: View {
                 ForEach(vacationDaysDraft) { day in
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(day.date)
+                            Text(AppDateFormatter.date(day.date))
                                 .font(.headline)
 
                             if let comment = day.comment, !comment.isEmpty {
@@ -739,7 +739,7 @@ struct FinanceAdminView: View {
                             }
 
                             if let date = item.operation_date {
-                                Text(date)
+                                Text(AppDateFormatter.date(date))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -878,7 +878,7 @@ private struct WorkingDayDraftRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(day.date)
+                Text(AppDateFormatter.date(day.date))
                     .font(.headline)
 
                 Text(day.is_working ? "Рабочий день" : "Выходной")

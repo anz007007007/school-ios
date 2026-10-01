@@ -70,9 +70,7 @@ struct NotificationsView: View {
         .navigationTitle("Уведомления")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            if notifications.isEmpty {
-                await loadNotifications()
-            }
+            await loadNotifications()
         }
         .refreshable {
             await loadNotifications()
@@ -393,29 +391,6 @@ struct NotificationRowView: View {
     }
 
     private func formatDate(_ value: String) -> String {
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [
-            .withInternetDateTime,
-            .withFractionalSeconds
-        ]
-
-        var date = isoFormatter.date(from: value)
-
-        if date == nil {
-            let fallbackISOFormatter = ISO8601DateFormatter()
-            fallbackISOFormatter.formatOptions = [.withInternetDateTime]
-            date = fallbackISOFormatter.date(from: value)
-        }
-
-        guard let date else {
-            return value
-        }
-
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-
-        return formatter.string(from: date)
+        AppDateFormatter.dateTime(value)
     }
 }

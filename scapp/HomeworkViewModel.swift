@@ -739,19 +739,21 @@ final class HomeworkViewModel: ObservableObject {
             return dateString
         }
 
+        let formattedDate = AppDateFormatter.date(dateString)
+
         if Calendar.current.isDateInToday(date) {
-            return "Сегодня · \(dateString)"
+            return "Сегодня · \(formattedDate)"
         }
 
         if Calendar.current.isDateInTomorrow(date) {
-            return "Завтра · \(dateString)"
+            return "Завтра · \(formattedDate)"
         }
 
         if Calendar.current.isDateInYesterday(date) {
-            return "Вчера · \(dateString)"
+            return "Вчера · \(formattedDate)"
         }
 
-        return "\(Self.displayDateFormatter.string(from: date)) · \(dateString)"
+        return "\(Self.displayDateFormatter.string(from: date)) · \(formattedDate)"
     }
 
     func isToday(_ dateString: String) -> Bool {
