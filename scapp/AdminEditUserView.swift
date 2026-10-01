@@ -151,7 +151,7 @@ struct AdminEditUserView: View {
                     }
                 }
             } message: {
-                Text("Пользователь \(user.login) больше не сможет входить в систему.")
+                Text("Запись «\(user.full_name)» будет отключена: вход в систему станет недоступен.")
             }
         }
     }

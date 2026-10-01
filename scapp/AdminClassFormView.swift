@@ -3,7 +3,7 @@ import SwiftUI
 struct AdminClassFormData {
     var name: String = ""
     var educationLevel: String = "school"
-    var academicYear: String = "2025-2026"
+    var academicYear: String = AdminDateInput.currentAcademicYear
     var curatorTeacherID: Int = 0
 }
 
@@ -19,7 +19,6 @@ struct AdminClassFormView: View {
                 Picker("Уровень образования", selection: $formData.educationLevel) {
                     Text("Школа").tag("school")
                     Text("Детский сад").tag("kindergarten")
-                    Text("Дополнительное").tag("additional")
                 }
 
                 TextField("Учебный год", text: $formData.academicYear)

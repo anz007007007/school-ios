@@ -429,7 +429,7 @@ struct AdminEditScheduleLessonView: View {
                     }
                 }
             } message: {
-                Text("Урок \(lesson.class_name) / \(lesson.subject_name) будет удалён из расписания.")
+                Text("Запись «\(lesson.class_name) / \(lesson.subject_name)» будет удалена из расписания.")
             }
         }
     }

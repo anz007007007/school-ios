@@ -147,7 +147,8 @@ enum APIRequestError: LocalizedError {
         }
     }
 
-    private static func readableServerError(statusCode: Int, text: String) -> String {
+    /// Понятный русский текст по коду ответа и `detail` FastAPI (без «HTTP 4xx» и сырого JSON).
+    static func readableServerError(statusCode: Int, text: String) -> String {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if statusCode == 401 {
@@ -174,8 +175,18 @@ enum APIRequestError: LocalizedError {
             return "Ошибка сервера. Попробуйте позже."
         }
 
-        return readableDetail(from: cleanText)
-            ?? (cleanText.isEmpty ? "Ошибка сервера: \(statusCode)" : "Ошибка сервера: \(statusCode). \(cleanText)")
+        if let detail = readableDetail(from: cleanText) {
+            return detail
+        }
+
+        switch statusCode {
+        case 400:
+            return "Сервер отклонил запрос. Проверьте введённые данные."
+        case 409:
+            return "Такая запись уже существует."
+        default:
+            return "Ошибка сервера (код \(statusCode))."
+        }
     }
 
     private static func readableDetail(from text: String) -> String? {
@@ -268,6 +279,10 @@ enum APIRequestError: LocalizedError {
     }
 
     private static func translateServerMessage(_ message: String) -> String {
+        if let known = APIServerMessageTranslations.known[message.trimmingCharacters(in: .whitespacesAndNewlines)] {
+            return known
+        }
+
         let lowercased = message.lowercased()
 
         if lowercased.contains("student already has credentials") {
