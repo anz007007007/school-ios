@@ -356,6 +356,14 @@ final class AppState: ObservableObject {
     @Published var pushNotificationsFeatureEnabled = true
     @Published var pushRoute: PushRoute?
     @Published var didTryRestoreSession = false
+    /// Идёт автоматический вход по сохранённым данным при запуске.
+    @Published private(set) var isRestoringSession = false
+    /// Вход при запуске не удался из-за сети или ошибки сервера: данные входа
+    /// сохранены, показываем «Повторить» и «Выйти» вместо формы входа.
+    @Published var startupErrorMessage: String?
+    /// Последняя попытка входа отклонена сервером (4xx). Только такие попытки
+    /// идут в счётчик блокировки; сетевые ошибки и 5xx — нет.
+    @Published private(set) var lastLoginRejected = false
     @Published private(set) var unreadNotificationsBySection: [String: Int] = [:]
     @Published private(set) var tabReselectToken: [MainTabSelection: Int] = [:]
 
@@ -364,15 +372,18 @@ final class AppState: ObservableObject {
     )
 
     private var cancellables = Set<AnyCancellable>()
+    private var sessionCheckTask: Task<Void, Never>?
 
     init() {
         PushNotificationService.shared.appState = self
 
         NotificationCenter.default.publisher(for: .authSessionExpired)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] notification in
+                let requestToken = notification.userInfo?[AuthSessionEvents.requestTokenKey] as? String
+
                 Task { @MainActor in
-                    self?.handleSessionExpired()
+                    self?.handleSessionExpiredEvent(requestToken: requestToken)
                 }
             }
             .store(in: &cancellables)
@@ -387,7 +398,7 @@ final class AppState: ObservableObject {
     }
 
     func refreshUnreadNotificationsBySection() async {
-        guard isAuthenticated else {
+        guard isAuthenticated, let requestToken = api.authToken else {
             unreadNotificationsBySection = [:]
             return
         }
@@ -430,6 +441,11 @@ final class AppState: ObservableObject {
                 result[route.sectionKey, default: 0] += 1
             }
 
+            // Ответ мог прийти уже после выхода или входа под другим пользователем.
+            guard isAuthenticated, api.authToken == requestToken else {
+                return
+            }
+
             unreadNotificationsBySection = result
         } catch {
             #if DEBUG
@@ -444,47 +460,143 @@ final class AppState: ObservableObject {
         }
 
         didTryRestoreSession = true
+        await performSessionRestore()
+    }
 
-        guard LoginSecurityService.shared.rememberLogin else {
-            await PushNotificationService.shared.processPendingNotificationTapIfNeeded()
+    /// «Повторить» на экране ошибки запуска.
+    func retrySessionRestore() async {
+        startupErrorMessage = nil
+        await performSessionRestore()
+    }
+
+    /// «Выйти» на экране ошибки запуска: больше не входим автоматически.
+    func cancelSessionRestore() {
+        startupErrorMessage = nil
+        errorMessage = nil
+        LoginSecurityService.shared.isSessionActive = false
+    }
+
+    private func performSessionRestore() async {
+        let security = LoginSecurityService.shared
+
+        guard security.rememberLogin, security.isSessionActive else {
             return
         }
 
-        do {
-            guard let credentials = try LoginSecurityService.shared.loadCredentials() else {
-                await PushNotificationService.shared.processPendingNotificationTapIfNeeded()
-                return
+        guard let credentials = try? security.loadCredentials() else {
+            return
+        }
+
+        isRestoringSession = true
+        isLoading = true
+        errorMessage = nil
+        startupErrorMessage = nil
+
+        await PushNotificationService.shared.waitForPendingDetach()
+
+        switch await authenticate(login: credentials.login, password: credentials.password) {
+        case .success:
+            await completeLogin()
+
+        case .rejected(let statusCode, let message):
+            // Сервер отклонил сохранённые данные (сменили пароль, учётку отключили):
+            // удаляем их только на 401/403, на прочие 4xx оставляем.
+            if statusCode == 401 || statusCode == 403 {
+                security.deleteCredentials()
+                security.rememberLogin = false
             }
 
-            isLoading = true
-            errorMessage = nil
+            errorMessage = "Не удалось восстановить вход: \(message)"
 
-            _ = try await api.login(
-                login: credentials.login,
-                password: credentials.password
-            )
-
-            currentUser = try await api.getCurrentUser()
-            isAuthenticated = true
-
-            await refreshMobileConfigFeatures()
-            await refreshUnreadNotificationsBySection()
-
-            await registerPushNotificationsIfNeeded()
-
-            await PushNotificationService.shared.processPendingNotificationTapIfNeeded()
-
-            if let pushRoute {
-                await markPushNotificationReadIfNeeded(pushRoute.notificationID)
-            }
-        } catch {
-            errorMessage = "Не удалось восстановить вход: \(readableLoginError(error))"
-            isAuthenticated = false
-            unreadNotificationsBySection = [:]
-            await PushNotificationService.shared.processPendingNotificationTapIfNeeded()
+        case .failed(let message):
+            // Сеть или 5xx: данные входа не трогаем, даём повторить.
+            startupErrorMessage = message
         }
 
         isLoading = false
+        isRestoringSession = false
+    }
+
+    private enum AuthAttemptResult {
+        case success
+        /// Сервер отклонил вход (4xx).
+        case rejected(statusCode: Int, message: String)
+        /// Сеть, 5xx или неразборчивый ответ.
+        case failed(message: String)
+    }
+
+    /// Вход и загрузка /auth/me. Токен остаётся в `api` только если оба шага прошли.
+    private func authenticate(login: String, password: String) async -> AuthAttemptResult {
+        do {
+            _ = try await api.login(login: login, password: password)
+        } catch {
+            api.logout()
+
+            if let statusCode = Self.loginStatusCode(from: error), (400..<500).contains(statusCode) {
+                return .rejected(statusCode: statusCode, message: readableLoginError(error))
+            }
+
+            return .failed(message: readableLoginError(error))
+        }
+
+        do {
+            currentUser = try await api.getCurrentUser()
+            return .success
+        } catch {
+            api.logout()
+            currentUser = nil
+
+            if isUnauthorizedError(error) {
+                return .rejected(statusCode: 401, message: readableLoginError(error))
+            }
+
+            if error.localizedDescription.contains("403") {
+                return .rejected(statusCode: 403, message: readableLoginError(error))
+            }
+
+            return .failed(message: "Не удалось загрузить данные пользователя. Проверьте интернет и попробуйте снова.")
+        }
+    }
+
+    /// Код ответа сервера на /auth/login по ошибке из SchoolAPI.login (пакет не отдаёт код напрямую).
+    private static func loginStatusCode(from error: Error) -> Int? {
+        guard let apiError = error as? SchoolAPIError,
+              case .serverError(let message) = apiError else {
+            return nil
+        }
+
+        switch message {
+        case "Неверный логин или пароль.":
+            return 401
+        case "Проверьте данные для входа и согласия.":
+            return 400
+        case "Проверьте логин, пароль и согласия.":
+            return 422
+        case "Ошибка сервера. Попробуйте позже.":
+            return 500
+        default:
+            let prefix = "Ошибка авторизации: "
+
+            guard message.hasPrefix(prefix) else {
+                return nil
+            }
+
+            return Int(message.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    private func completeLogin() async {
+        isAuthenticated = true
+        errorMessage = nil
+        startupErrorMessage = nil
+        LoginSecurityService.shared.isSessionActive = true
+
+        await refreshMobileConfigFeatures()
+        await refreshUnreadNotificationsBySection()
+
+        await registerPushNotificationsIfNeeded()
+
+        await PushNotificationService.shared.processPendingNotificationTapIfNeeded()
     }
 
     func openPushRoute(_ route: PushRoute) {
@@ -492,17 +604,25 @@ final class AppState: ObservableObject {
         print("PUSH OPEN ROUTE:", route.sectionKey, "notificationID:", route.notificationID as Any)
         #endif
 
+        guard isAuthenticated else {
+            return
+        }
+
+        let route = canOpenPushRoute(route) ? route : .notifications(notificationID: route.notificationID)
+        let userID = currentUser?.id
+
         pushRoute = nil
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            // Пока ждали, могли выйти или войти под другим пользователем.
+            guard let self, self.isAuthenticated, self.currentUser?.id == userID else {
+                return
+            }
+
             #if DEBUG
             print("PUSH SET ROUTE:", route.sectionKey)
             #endif
-            self?.pushRoute = route
-        }
-
-        guard isAuthenticated else {
-            return
+            self.pushRoute = route
         }
 
         Task {
@@ -617,28 +737,25 @@ final class AppState: ObservableObject {
     ) async {
         isLoading = true
         errorMessage = nil
+        startupErrorMessage = nil
+        lastLoginRejected = false
 
-        do {
-            _ = try await api.login(
-                login: login,
-                password: password
-            )
+        // Отвязка push после прошлого выхода должна закончиться до нового входа,
+        // иначе она удалит устройство уже нового пользователя.
+        await PushNotificationService.shared.waitForPendingDetach()
 
-            currentUser = try await api.getCurrentUser()
-            isAuthenticated = true
+        switch await authenticate(login: login, password: password) {
+        case .success:
+            await completeLogin()
 
-            await refreshMobileConfigFeatures()
-            await refreshUnreadNotificationsBySection()
+        case .rejected(_, let message):
+            errorMessage = message
+            lastLoginRejected = true
+            isAuthenticated = false
+            unreadNotificationsBySection = [:]
 
-            await registerPushNotificationsIfNeeded()
-
-            await PushNotificationService.shared.processPendingNotificationTapIfNeeded()
-
-            if let pushRoute {
-                await markPushNotificationReadIfNeeded(pushRoute.notificationID)
-            }
-        } catch {
-            errorMessage = readableLoginError(error)
+        case .failed(let message):
+            errorMessage = message
             isAuthenticated = false
             unreadNotificationsBySection = [:]
         }
@@ -647,15 +764,25 @@ final class AppState: ObservableObject {
     }
 
     func refreshCurrentUser() async {
+        guard isAuthenticated, let requestToken = api.authToken else {
+            return
+        }
+
         do {
-            currentUser = try await api.getCurrentUser()
-            isAuthenticated = true
+            let user = try await api.getCurrentUser()
+
+            // Ответ на запрос прошлой сессии не должен подменить пользователя.
+            guard isAuthenticated, api.authToken == requestToken else {
+                return
+            }
+
+            currentUser = user
 
             await refreshMobileConfigFeatures()
             await refreshUnreadNotificationsBySection()
         } catch {
             if isUnauthorizedError(error) {
-                handleSessionExpired()
+                handleSessionExpiredEvent(requestToken: requestToken)
             } else {
                 errorMessage = "Не удалось обновить профиль: \(error.localizedDescription)"
             }
@@ -720,7 +847,11 @@ final class AppState: ObservableObject {
             }
 
             if httpResponse.statusCode == 401 {
-                handleSessionExpired()
+                handleSessionExpiredEvent(requestToken: token)
+                return
+            }
+
+            guard api.authToken == token else {
                 return
             }
 
@@ -738,11 +869,64 @@ final class AppState: ObservableObject {
     }
 
     func logout() {
-        isAuthenticated = false
-        currentUser = nil
+        // Токен нужен, чтобы удалить push-устройство на сервере уже после выхода.
+        let authToken = api.authToken
+
+        PushNotificationService.shared.detachOnLogout(authToken: authToken)
+        LoginSecurityService.shared.isSessionActive = false
+
+        resetSessionState()
         errorMessage = nil
-        pushNotificationsFeatureEnabled = true
-        unreadNotificationsBySection = [:]
+    }
+
+    /// 401 от запроса. `requestToken` — токен, с которым ушёл запрос, если он известен.
+    /// Запоздавший ответ на запрос прошлой сессии не должен разлогинить только что
+    /// вошедшего пользователя.
+    func handleSessionExpiredEvent(requestToken: String?) {
+        guard isAuthenticated else {
+            return
+        }
+
+        guard let currentToken = api.authToken else {
+            handleSessionExpired()
+            return
+        }
+
+        if let requestToken {
+            if requestToken == currentToken {
+                handleSessionExpired()
+            }
+
+            return
+        }
+
+        // Токен запроса неизвестен (экраны со своим URLSession): проверяем текущую
+        // сессию через /auth/me и выходим, только если и он ответит 401.
+        guard sessionCheckTask == nil else {
+            return
+        }
+
+        sessionCheckTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.sessionCheckTask = nil
+            }
+
+            do {
+                _ = try await self.api.getCurrentUser()
+            } catch {
+                guard self.isAuthenticated, self.api.authToken == currentToken else {
+                    return
+                }
+
+                if self.isUnauthorizedError(error) {
+                    self.handleSessionExpired()
+                }
+            }
+        }
     }
 
     func handleSessionExpired() {
@@ -750,11 +934,33 @@ final class AppState: ObservableObject {
             return
         }
 
+        // Токен уже недействителен: устройство на сервере не удалить, но FCM-токен
+        // и показанные уведомления чистим.
+        PushNotificationService.shared.detachOnLogout(authToken: nil)
+
+        resetSessionState()
+        errorMessage = "Сессия истекла. Войдите снова."
+    }
+
+    /// Сбрасывает всё, что относится к пользователю. Экраны (их ViewModel) живут
+    /// внутри MainTabView и уничтожаются вместе с ним при isAuthenticated = false.
+    private func resetSessionState() {
+        sessionCheckTask?.cancel()
+        sessionCheckTask = nil
+
+        api.logout()
+
         isAuthenticated = false
         currentUser = nil
+        pushRoute = nil
         pushNotificationsFeatureEnabled = true
         unreadNotificationsBySection = [:]
-        errorMessage = "Сессия истекла. Войдите снова."
+        tabReselectToken = [:]
+        lastParentContextRefreshDate = .distantPast
+        lastLoginRejected = false
+
+        // Выбранный ребёнок в «Домашке» относится к прошлому пользователю.
+        UserDefaults.standard.removeObject(forKey: "homework_selected_student_id")
     }
 
     private func isUnauthorizedError(_ error: Error) -> Bool {
@@ -972,84 +1178,148 @@ final class AppState: ObservableObject {
         userRoleCode == "manager"
     }
 
-    func hasPermission(_ permission: String) -> Bool {
-        isAdmin || permissions.contains(permission)
+    var isAdminOrManager: Bool {
+        isAdmin || isManager
     }
 
+    private func hasRole(_ roles: String...) -> Bool {
+        roles.contains(userRoleCode)
+    }
+
+    // MARK: - Permissions
+    //
+    // Сервер присылает права как «раздел.действие» (finance.read, medical.manage,
+    // messages.send). Поддерживаем и старый разделитель «:» и вид admin.<раздел>.
+    // Правила ниже повторяют проверки бэкенда (app/routers/*): часть разделов сервер
+    // пускает по праву (homework.manage, messages.send, events.manage), часть — только
+    // по роли (финансы, документы, меню, медкарты, учебники, портфолио, объявления).
+    // Если дать доступ по праву там, где сервер смотрит на роль, кнопка появится,
+    // а сервер ответит 403.
+
+    enum PermissionLevel {
+        /// Любое право на раздел: read, manage, send…
+        case read
+        /// Право изменять: manage, create, update, delete…
+        case manage
+    }
+
+    /// Меню на сервере проверяется как menu.*, в справочнике прав (app/permissions.py) — food.*.
+    private static let permissionResourceAliases: [String: Set<String>] = [
+        "menu": ["menu", "food"]
+    ]
+
+    private static let manageActions: Set<String> = [
+        "manage", "create", "update", "delete", "write", "edit", "admin", "all", "*"
+    ]
+
+    private static func parsePermission(_ raw: String) -> (resource: String, action: String)? {
+        let normalized = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: ":", with: ".")
+            .replacingOccurrences(of: "-", with: "_")
+
+        guard !normalized.isEmpty else {
+            return nil
+        }
+
+        let parts = normalized.split(separator: ".", maxSplits: 1).map(String.init)
+
+        // admin.finance / admin:finance — управление разделом.
+        if parts.count == 2 && parts[0] == "admin" {
+            return (parts[1], "manage")
+        }
+
+        // Голое «finance» раньше означало полный доступ к разделу.
+        return (parts[0], parts.count == 2 ? parts[1] : "manage")
+    }
+
+    /// Есть ли у пользователя право на раздел `resource` уровня `level`.
+    /// `extraActions` — действия, которых тоже достаточно (например, send для сообщений).
+    /// Можно передать и полный код права («clubs.manage», «finance:read», «admin.menu»):
+    /// он разбирается так же, как права с сервера.
+    func hasPermission(
+        _ resource: String,
+        level: PermissionLevel = .read,
+        extraActions: Set<String> = []
+    ) -> Bool {
+        if resource.contains(".") || resource.contains(":") {
+            guard let requested = Self.parsePermission(resource) else {
+                return false
+            }
+
+            // «finance.read» — любое право на раздел; «clubs.manage»/«admin.clubs» — право
+            // изменять; прочее («messages.send») — это действие или право изменять.
+            if requested.action == "read" && level == .read {
+                return hasPermission(requested.resource)
+            }
+
+            if Self.manageActions.contains(requested.action) {
+                return hasPermission(requested.resource, level: .manage, extraActions: extraActions)
+            }
+
+            return hasPermission(
+                requested.resource,
+                level: .manage,
+                extraActions: extraActions.union([requested.action])
+            )
+        }
+
+        let names = Self.permissionResourceAliases[resource] ?? [resource]
+
+        return permissions.contains { raw in
+            guard let permission = Self.parsePermission(raw),
+                  names.contains(permission.resource) else {
+                return false
+            }
+
+            switch level {
+            case .read:
+                return true
+            case .manage:
+                return Self.manageActions.contains(permission.action)
+                    || extraActions.contains(permission.action)
+            }
+        }
+    }
+
+    /// Хотя бы одно из прав. Коды в любом формате: «resource.action», «resource:action»,
+    /// «admin.<resource>». Администратор проходит всегда.
     func hasAnyPermission(_ values: [String]) -> Bool {
         if isAdmin {
             return true
         }
 
-        return values.contains { permissions.contains($0) }
+        return values.contains { hasPermission($0) }
     }
 
-    // MARK: - Teacher permissions
+    // MARK: - Teacher permissions (teacher.py)
 
     var canOpenTeacherCabinet: Bool {
-        isAdmin || isTeacher || hasAnyPermission([
-            "teacher:classes",
-            "teacher:subjects",
-            "teacher:students",
-            "teacher:grades",
-            "teacher:homework",
-            "teacher:attendance",
-            "teacher:gradebook",
-            "teacher:schedule",
-            "admin:teachers",
-            "admin:grades"
-        ])
+        hasRole("admin", "teacher")
     }
 
     var canTeacherManageGrades: Bool {
-        isAdmin || isTeacher || hasAnyPermission([
-            "grades.manage",
-            "teacher:grades",
-            "grades:create",
-            "grades:delete",
-            "admin:grades"
-        ])
+        isAdmin || (isTeacher && hasPermission("grades", level: .manage))
     }
 
     var canTeacherManageHomework: Bool {
-        isAdmin || hasAnyPermission([
-            "teacher:homework",
-            "homework:create",
-            "homework:delete",
-            "admin:homework"
-        ])
+        isAdmin || (isTeacher && hasPermission("homework", level: .manage))
     }
 
     var canTeacherManageAttendance: Bool {
-        isAdmin || hasAnyPermission([
-            "teacher:attendance",
-            "attendance:create",
-            "admin:attendance"
-        ])
+        isAdmin || (isTeacher && hasPermission("attendance", level: .manage))
     }
 
     var canTeacherManageFinalGrades: Bool {
-        isAdmin || isTeacher || hasAnyPermission([
-            "grades.manage",
-            "teacher:grades",
-            "teacher:gradebook",
-            "teacher:final-grades",
-            "final-grades:create",
-            "final-grades:update",
-            "admin:grades"
-        ])
+        canTeacherManageGrades
     }
 
     // MARK: - Feature permissions
 
+    /// homework.py: создание по праву homework.manage.
     var canManageHomework: Bool {
-        hasAnyPermission([
-            "homework:create",
-            "homework:update",
-            "homework:delete",
-            "teacher:homework",
-            "admin:homework"
-        ])
+        hasRole("admin", "teacher") || hasPermission("homework", level: .manage)
     }
 
     /// events.py: управлять событиями могут admin/manager и учитель с правом events.manage.
@@ -1091,144 +1361,113 @@ final class AppState: ObservableObject {
         return teacherUserID == userID
     }
 
+    /// admin.py: расписание правят admin/manager.
     var canManageSchedule: Bool {
-        hasAnyPermission([
-            "schedule:create",
-            "schedule:update",
-            "schedule:delete",
-            "admin:schedule"
-        ])
+        isAdminOrManager
     }
 
+    /// messages.py: отправка (в т. ч. рассылка) по праву messages.send.
     var canSendMessages: Bool {
-        isAdmin
-        || isTeacher
-        || isParent
-        || isStudent
-        || hasAnyPermission([
-            "messages:send",
-            "messages:create",
-            "admin:messages",
-            "teacher:messages"
-        ])
+        hasRole("admin", "manager", "teacher", "parent")
+            || hasPermission("messages", level: .manage, extraActions: ["send"])
     }
 
+    /// Рассылка нескольким адресатам — для сотрудников с правом отправки.
+    var canSendBulkMessages: Bool {
+        canSendMessages && hasRole("admin", "manager", "teacher")
+    }
+
+    /// messages.py: объявления — events.manage и роль admin/manager/teacher.
+    var canCreateAnnouncements: Bool {
+        isAdminOrManager || (isTeacher && hasPermission("events", level: .manage))
+    }
+
+    /// finance.py: смотреть admin/manager/parent (ученику раздел не показываем).
     var canUseFinance: Bool {
-        !isStudent
-        && (
-            isAdmin
-            || isManager
-            || isParent
-            || hasAnyPermission([
-                "finance:view",
-                "finance:read",
-                "finance:create",
-                "finance:update",
-                "finance:delete",
-                "payments:create",
-                "payments:update",
-                "payments:delete",
-                "admin:finance"
-            ])
-        )
+        hasRole("admin", "manager", "parent")
+    }
+
+    /// finance.py: управлять — finance.manage и роль admin/manager; одного права мало.
+    var canManageFinance: Bool {
+        isAdminOrManager
     }
 
     var canSelfEnrollClubs: Bool {
         isParent
     }
 
+    /// menu.py: menu.manage и роль admin/manager/cook. Проверяем роль.
     var canManageMenu: Bool {
-        isCook || isManager || hasAnyPermission([
-            "menu:create",
-            "menu:update",
-            "menu:delete",
-            "menu:dishes",
-            "menu:week",
-            "admin:menu"
-        ])
+        hasRole("admin", "manager", "cook")
     }
 
+    /// health.py: проверка только по роли (права medical.* сервер не смотрит).
     var canViewHealth: Bool {
-        isAdmin
-        || isManager
-        || isParent
-        || isCook
-        || hasAnyPermission([
-            "health:view",
-            "health:read",
-            "health:cards",
-            "medical:health",
-            "admin:health"
-        ])
+        hasRole("admin", "manager", "teacher", "parent", "cook")
     }
 
     var canManageHealth: Bool {
-        !isCook
-        && (
-            isManager
-            || isParent
-            || hasAnyPermission([
-                "health:create",
-                "health:update",
-                "health:delete",
-                "health:cards",
-                "medical:health",
-                "admin:health"
-            ])
-        )
+        hasRole("admin", "manager", "teacher", "parent")
     }
 
-    /// Документы (routers/documents.py): управлять могут только admin/manager
-    /// (_ensure_can_manage_documents), право по permission тут не помогает — сервер ответит 403.
-    var canManageDocuments: Bool {
-        isAdmin || isManager
+    /// documents.py: все разделы документов требуют documents.read
+    /// (по умолчанию есть у admin, manager, parent; у учителя и ученика нет).
+    var canViewDocuments: Bool {
+        isAdminOrManager || hasPermission("documents")
     }
 
-    /// Профили, ученики и сгенерированные документы (_append_profile_access_filter):
-    /// admin/manager — все, parent/student — свои, остальным ролям сервер отвечает 403.
-    /// Публичные документы доступны всем.
+    /// documents.py (_append_profile_access_filter): профили, ученики и сгенерированные
+    /// документы — admin/manager все, parent/student свои, остальным ролям 403.
     var canReadDocumentProfiles: Bool {
-        isAdmin || isManager || isParent || isStudent
+        canViewDocuments && hasRole("admin", "manager", "parent", "student")
     }
 
+    /// documents.py: documents.manage и роль admin/manager.
+    var canManageDocuments: Bool {
+        isAdminOrManager
+    }
+
+    /// textbooks.py: смотреть все, кроме повара; управлять admin/manager.
     var canViewTextbooks: Bool {
-        isAdmin
-        || isManager
-        || isTeacher
-        || isParent
-        || isStudent
-        || hasAnyPermission([
-            "textbooks:view",
-            "textbooks:read",
-            "admin:textbooks"
-        ])
+        currentUser != nil && !isCook
     }
 
     var canManageTextbooks: Bool {
-        isAdmin
-        || isManager
-        || hasAnyPermission([
-            "textbooks:create",
-            "textbooks:update",
-            "textbooks:delete",
-            "textbooks:manage",
-            "admin:textbooks"
-        ])
+        isAdminOrManager
     }
 
-    var canManageFinance: Bool {
-        !isStudent
-        && (
-            isManager
-            || hasAnyPermission([
-                "finance:create",
-                "finance:update",
-                "finance:delete",
-                "payments:create",
-                "payments:update",
-                "payments:delete",
-                "admin:finance"
-            ])
-        )
+    /// portfolio.py: смотреть admin/manager/teacher/parent/student.
+    var canUsePortfolio: Bool {
+        hasRole("admin", "manager", "teacher", "parent", "student")
+    }
+
+    /// community_ads.py: смотреть admin/manager/teacher/parent, управлять admin/manager.
+    var canViewCommunity: Bool {
+        hasRole("admin", "manager", "teacher", "parent")
+    }
+
+    var canManageCommunity: Bool {
+        isAdminOrManager
+    }
+
+    /// Можно ли открыть раздел, в который ведёт уведомление. Иначе открываем
+    /// список уведомлений, а не экран, который сервер отклонит 403.
+    func canOpenPushRoute(_ route: PushRoute) -> Bool {
+        switch route {
+        case .finance:
+            return canUseFinance
+        case .health:
+            return canViewHealth
+        case .documents:
+            return canViewDocuments
+        case .textbooks:
+            return canViewTextbooks
+        case .portfolio:
+            return canUsePortfolio
+        case .community:
+            return canViewCommunity
+        default:
+            return true
+        }
     }
 }

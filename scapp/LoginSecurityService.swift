@@ -14,6 +14,7 @@ final class LoginSecurityService {
     private let rememberLoginKey = "login.rememberLogin"
     private let failedAttemptsKey = "login.failedAttempts"
     private let lockUntilKey = "login.lockUntil"
+    private let sessionActiveKey = "login.sessionActive"
 
     private let maxAttempts = 5
     private let lockDuration: TimeInterval = 60
@@ -40,6 +41,18 @@ final class LoginSecurityService {
         }
         set {
             UserDefaults.standard.set(newValue, forKey: rememberLoginKey)
+        }
+    }
+
+    /// Пользователь вошёл и не нажимал «Выйти». Автовход при запуске выполняется
+    /// только тогда: сохранённые данные остаются для входа по биометрии, но после
+    /// выхода приложение не должно само войти снова. Нет значения (старые установки) — true.
+    var isSessionActive: Bool {
+        get {
+            UserDefaults.standard.object(forKey: sessionActiveKey) as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: sessionActiveKey)
         }
     }
 

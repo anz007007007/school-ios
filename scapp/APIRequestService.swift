@@ -68,7 +68,7 @@ final class APIRequestService {
             #endif
 
             if httpResponse.statusCode == 401 {
-                AuthSessionEvents.notifySessionExpired()
+                AuthSessionEvents.notifySessionExpired(requestToken: token)
                 throw APIRequestError.serverError(
                     statusCode: httpResponse.statusCode,
                     text: responseText

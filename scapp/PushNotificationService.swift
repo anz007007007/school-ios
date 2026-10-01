@@ -105,6 +105,10 @@ final class PushNotificationService: NSObject, ObservableObject {
 
     private let deviceUIDStorageKey = "push.device_uid"
     private let lastRegisteredFCMTokenStorageKey = "push.last_registered_fcm_token"
+    private let registeredPushDeviceIDStorageKey = "push.registered_device_id"
+
+    /// Отвязка устройства после выхода. Следующий вход ждёт её завершения.
+    private var detachTask: Task<Void, Never>?
 
     private var lastRegisteredFCMToken: String?
     private var isRegisteringDevice = false
@@ -555,6 +559,12 @@ final class PushNotificationService: NSObject, ObservableObject {
     // MARK: - Server Registration
 
     func registerDeviceIfPossible(api: SchoolAPI, force: Bool = false) async {
+        // После выхода токена нет: регистрировать устройство не на кого.
+        guard api.authToken != nil, appState?.isAuthenticated ?? true else {
+            print("PUSH REGISTER SKIPPED: not authenticated")
+            return
+        }
+
         currentAPI = api
         errorMessage = nil
 
@@ -605,6 +615,10 @@ final class PushNotificationService: NSObject, ObservableObject {
 
             lastRegisteredFCMToken = fcmToken
             UserDefaults.standard.set(fcmToken, forKey: lastRegisteredFCMTokenStorageKey)
+
+            if let deviceID = response.push_device_id {
+                UserDefaults.standard.set(deviceID, forKey: registeredPushDeviceIDStorageKey)
+            }
             lastRegistrationMessage = "FCM token отправлен на сервер. device_id: \(response.push_device_id?.description ?? "-")"
 
             await refreshBadge(api: api)
@@ -652,6 +666,135 @@ final class PushNotificationService: NSObject, ObservableObject {
             await setBadgeCount(0)
         } catch {
             errorMessage = "Не удалось отключить push для устройства: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Logout
+
+    /// Выход или истечение сессии: удаляем устройство на сервере (если есть токен),
+    /// удаляем FCM-токен и показанные уведомления. Работает в фоне; следующий вход
+    /// ждёт завершения через `waitForPendingDetach()`.
+    func detachOnLogout(authToken: String?) {
+        let previousTask = detachTask
+        let deviceToken = fcmToken ?? lastRegisteredFCMToken
+        let savedDeviceID = UserDefaults.standard.object(forKey: registeredPushDeviceIDStorageKey) as? Int
+        let uid = deviceUID
+
+        // С этого момента новые FCM-токены не отправляются на сервер до следующего входа.
+        currentAPI = nil
+        isAttached = false
+        fcmToken = nil
+        didCreateFreshFCMTokenAfterAPNS = false
+        lastRegisteredFCMToken = nil
+        UserDefaults.standard.removeObject(forKey: lastRegisteredFCMTokenStorageKey)
+        UserDefaults.standard.removeObject(forKey: registeredPushDeviceIDStorageKey)
+        pendingNotificationTapUserInfo = nil
+        latestRemoteNotificationUserInfo = nil
+        lastRegistrationMessage = nil
+        errorMessage = nil
+
+        detachTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+
+            guard let self else {
+                return
+            }
+
+            // Регистрация, начатая до выхода, могла ещё не закончиться: ждём её,
+            // иначе она снова привяжет устройство к прошлому пользователю.
+            var waitedSteps = 0
+            while self.isRegisteringDevice && waitedSteps < 100 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                waitedSteps += 1
+            }
+
+            if let authToken {
+                await self.deleteServerDevice(
+                    authToken: authToken,
+                    savedDeviceID: savedDeviceID,
+                    deviceToken: deviceToken,
+                    deviceUID: uid
+                )
+            }
+
+            await self.deleteFCMToken()
+
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+            await self.setBadgeCount(0)
+
+            print("PUSH DETACH ON LOGOUT DONE")
+        }
+    }
+
+    func waitForPendingDetach() async {
+        await detachTask?.value
+    }
+
+    /// Запросы с явным токеном: AppState уже вышел, и через APIRequestService
+    /// (он берёт токен из api и шлёт «сессия истекла» на 401) их делать нельзя.
+    private func deleteServerDevice(
+        authToken: String,
+        savedDeviceID: Int?,
+        deviceToken: String?,
+        deviceUID: String
+    ) async {
+        var deviceID = savedDeviceID
+
+        if deviceID == nil,
+           let data = await detachRequest(path: "/api/v1/push/devices", method: "GET", authToken: authToken),
+           let response = try? JSONDecoder().decode(PushDevicesListResponseDTO.self, from: data) {
+            deviceID = response.items.first { device in
+                device.device_uid == deviceUID
+                    || (deviceToken != nil && device.device_token == deviceToken)
+            }?.id
+        }
+
+        guard let deviceID else {
+            print("PUSH DETACH: device not found on server")
+            return
+        }
+
+        _ = await detachRequest(
+            path: "/api/v1/push/devices/\(deviceID)",
+            method: "DELETE",
+            authToken: authToken
+        )
+    }
+
+    private func detachRequest(path: String, method: String, authToken: String) async -> Data? {
+        guard let url = URL(string: "https://sc.it-status.ru\(path)") else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.applyMobileClientHeaders()
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            print("PUSH DETACH", method, path, "STATUS:", statusCode)
+
+            return (200...299).contains(statusCode) ? data : nil
+        } catch {
+            print("PUSH DETACH ERROR:", error.localizedDescription)
+            return nil
+        }
+    }
+
+    private func deleteFCMToken() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Messaging.messaging().deleteToken { error in
+                if let error {
+                    print("PUSH FCM DELETE ON LOGOUT ERROR:", error.localizedDescription)
+                }
+
+                continuation.resume()
+            }
         }
     }
 
@@ -766,6 +909,11 @@ final class PushNotificationService: NSObject, ObservableObject {
     }
 
     func processPendingNotificationTapIfNeeded() async {
+        // До входа нажатие не обрабатываем и не теряем: оно откроет раздел после входа.
+        guard appState?.isAuthenticated == true else {
+            return
+        }
+
         guard let pendingNotificationTapUserInfo = pendingNotificationTapUserInfo else {
             return
         }
