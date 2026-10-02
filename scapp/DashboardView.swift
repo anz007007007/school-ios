@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @Environment(\.openURL) private var openURL
     @EnvironmentObject var appState: AppState
     @StateObject private var viewModel = DashboardViewModel()
 
@@ -64,6 +65,20 @@ struct DashboardView: View {
             }
             .scrollContentBackground(.hidden)
             .appScreenBackground()
+            .alert("Доступна новая версия", isPresented: updateAlertBinding) {
+                if let url = viewModel.mobileConfig?.store_url.flatMap(URL.init(string:)) {
+                    Button("Обновить") {
+                        AppUpdatePrompt.isDismissed = true
+                        openURL(url)
+                    }
+                }
+
+                Button("Позже", role: .cancel) {
+                    AppUpdatePrompt.isDismissed = true
+                }
+            } message: {
+                Text("Эта версия приложения устарела. Обновите его, чтобы всё работало правильно.")
+            }
             .navigationTitle("Главная")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
@@ -122,6 +137,19 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    /// Мягкое напоминание: сервер сообщает, что сборка ниже минимальной (задаёт админ).
+    /// «Позже» скрывает его до следующего запуска приложения.
+    private var updateAlertBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.mobileConfig?.update_required == true && !AppUpdatePrompt.isDismissed },
+            set: { isPresented in
+                if !isPresented {
+                    AppUpdatePrompt.isDismissed = true
+                }
+            }
+        )
     }
 
     private var shouldRefreshOnAppear: Bool {
@@ -1498,4 +1526,9 @@ struct UnreadBadgeView: View {
                 .accessibilityLabel("Непрочитанных: \(count)")
         }
     }
+}
+
+/// Напоминание об обновлении показываем один раз за запуск приложения.
+enum AppUpdatePrompt {
+    @MainActor static var isDismissed = false
 }

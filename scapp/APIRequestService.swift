@@ -310,8 +310,41 @@ enum APIRequestError: LocalizedError {
 }
 
 extension URLRequest {
+    /// Тип клиента и техническая информация: по ней веб-аналитика показывает, кто с какой
+    /// версией и устройства заходит, а mobile-config отвечает, нужно ли обновиться.
     mutating func applyMobileClientHeaders() {
-        setValue("mobile", forHTTPHeaderField: "x-client-type")
-        setValue("ios", forHTTPHeaderField: "x-platform")
+        for (name, value) in MobileClientInfo.headers {
+            setValue(value, forHTTPHeaderField: name)
+        }
+    }
+}
+
+enum MobileClientInfo {
+    static let headers: [String: String] = {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+
+        return [
+            "x-client-type": "mobile",
+            "x-platform": "ios",
+            "x-app-version": info["CFBundleShortVersionString"] as? String ?? "",
+            "x-app-build": info["CFBundleVersion"] as? String ?? "",
+            "x-os-version": "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+            "x-device-model": deviceModel
+        ]
+    }()
+
+    /// Код модели вида «iPhone17,1» (в симуляторе — модель, которую он изображает).
+    private static var deviceModel: String {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+            return simulated
+        }
+
+        var systemInfo = utsname()
+        uname(&systemInfo)
+
+        return withUnsafeBytes(of: &systemInfo.machine) { buffer in
+            String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self)
+        }
     }
 }

@@ -31,10 +31,11 @@ private struct AuthMiddleware: ClientMiddleware {
             request.headerFields[.authorization] = "Bearer \(token)"
         }
 
-        // Как applyMobileClientHeaders() в приложении: сервер по ним отличает мобильный клиент.
-        if let clientType = HTTPField.Name("x-client-type"), let platform = HTTPField.Name("x-platform") {
-            request.headerFields[clientType] = "mobile"
-            request.headerFields[platform] = "ios"
+        // Как applyMobileClientHeaders() в приложении: тип клиента, версия и устройство.
+        for (name, value) in SchoolAPI.clientHeaders {
+            if let fieldName = HTTPField.Name(name) {
+                request.headerFields[fieldName] = value
+            }
         }
 
         return try await next(request, body, baseURL)
@@ -42,6 +43,12 @@ private struct AuthMiddleware: ClientMiddleware {
 }
 
 public final class SchoolAPI {
+    /// Заголовки клиента для запросов пакета; приложение задаёт их при запуске.
+    nonisolated(unsafe) public static var clientHeaders: [String: String] = [
+        "x-client-type": "mobile",
+        "x-platform": "ios"
+    ]
+
     public private(set) var client: Client
 
     private let tokenStorage = AuthTokenStorage()

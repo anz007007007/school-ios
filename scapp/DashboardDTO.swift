@@ -318,6 +318,9 @@ struct MobileConfigResponseDTO: Decodable, Hashable {
     let features: MobileConfigFeaturesDTO?
     /// Код калитки для вошедших; nil — не задан.
     let gate_code: String?
+    /// Сборка ниже минимальной — предложить обновиться.
+    let update_required: Bool?
+    let store_url: String?
 }
 
 struct MobileConfigUserDTO: Decodable, Hashable {

@@ -375,6 +375,8 @@ final class AppState: ObservableObject {
     private var sessionCheckTask: Task<Void, Never>?
 
     init() {
+        // Вход и /auth/me через пакет тоже несут версию приложения и устройство.
+        SchoolAPI.clientHeaders = MobileClientInfo.headers
         PushNotificationService.shared.appState = self
 
         NotificationCenter.default.publisher(for: .authSessionExpired)
