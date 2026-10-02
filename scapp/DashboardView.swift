@@ -157,6 +157,26 @@ struct DashboardView: View {
 
                 Spacer()
 
+                // Код калитки — небольшая плашка рядом с ролью, только если задан.
+                if let gateCode = viewModel.mobileConfig?.gate_code, !gateCode.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "key.fill")
+                            .font(.caption2)
+
+                        Text("Калитка \(gateCode)")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(AppTheme.heading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white.opacity(0.30))
+                    .clipShape(Capsule())
+                    .accessibilityLabel("Код калитки \(gateCode)")
+                    .fixedSize()
+                }
+
                 NavigationLink {
                     ProfileView()
                 } label: {
@@ -179,36 +199,12 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
             }
 
-            HStack(alignment: .center, spacing: 8) {
-                Text(headerSubtitle)
-                    .font(.title3)
-                    .fontWeight(.black)
-                    .foregroundStyle(AppTheme.heading)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-
-                // Код калитки — небольшая плашка справа, только если задан.
-                if let gateCode = viewModel.mobileConfig?.gate_code, !gateCode.isEmpty {
-                    Spacer(minLength: 0)
-
-                    HStack(spacing: 4) {
-                        Image(systemName: "key.fill")
-                            .font(.caption2)
-
-                        Text("Калитка \(gateCode)")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(AppTheme.heading)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.30))
-                    .clipShape(Capsule())
-                    .accessibilityLabel("Код калитки \(gateCode)")
-                    .fixedSize()
-                }
-            }
+            Text(headerSubtitle)
+                .font(.title3)
+                .fontWeight(.black)
+                .foregroundStyle(AppTheme.heading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 18)
