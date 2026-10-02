@@ -8,8 +8,9 @@ struct LoginView: View {
     @State private var isPasswordVisible = false
     @State private var rememberLogin = true
 
-    @State private var personalDataAccepted = true
-    @State private var termsAccepted = true
+    // Согласие пользователь даёт сам: заранее отмеченная галочка не считается согласием (152-ФЗ).
+    @State private var personalDataAccepted = false
+    @State private var termsAccepted = false
 
     @Environment(\.openURL) private var openURL
 

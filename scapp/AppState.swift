@@ -1422,6 +1422,12 @@ final class AppState: ObservableObject {
         canViewDocuments && hasRole("admin", "manager", "parent", "student")
     }
 
+    /// documents.py save_profile/generate (documents.read): admin/manager — для всех,
+    /// родитель — профиль и документы своих детей.
+    var canCreateDocumentProfiles: Bool {
+        canManageDocuments || (isParent && hasPermission("documents"))
+    }
+
     /// documents.py: documents.manage и роль admin/manager.
     var canManageDocuments: Bool {
         isAdmin || (isManager && hasPermission("documents", level: .manage))

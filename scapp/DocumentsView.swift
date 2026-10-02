@@ -27,6 +27,11 @@ struct DocumentsView: View {
         appState.canManageDocuments
     }
 
+    /// Профиль и генерация: admin/manager — для всех, родитель — для своих детей.
+    private var canCreateProfiles: Bool {
+        appState.canCreateDocumentProfiles
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -71,7 +76,7 @@ struct DocumentsView: View {
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if canManage {
+                    if canCreateProfiles {
                         Menu {
                             Button {
                                 viewModel.errorMessage = nil
@@ -86,11 +91,13 @@ struct DocumentsView: View {
                                 Label("Сгенерировать", systemImage: "doc.badge.gearshape")
                             }
 
-                            Button {
-                                viewModel.errorMessage = nil
-                                isShowingCreatePublicDocument = true
-                            } label: {
-                                Label("Публичный документ", systemImage: "doc.badge.plus")
+                            if canManage {
+                                Button {
+                                    viewModel.errorMessage = nil
+                                    isShowingCreatePublicDocument = true
+                                } label: {
+                                    Label("Публичный документ", systemImage: "doc.badge.plus")
+                                }
                             }
                         } label: {
                             Image(systemName: "plus")
@@ -109,7 +116,7 @@ struct DocumentsView: View {
             .sheet(item: $selectedProfile) { profile in
                 DocumentProfileDetailView(
                     profile: profile,
-                    canManage: canManage,
+                    canManage: canCreateProfiles,
                     onEdit: {
                         selectedProfile = nil
 
@@ -366,7 +373,7 @@ struct DocumentsView: View {
             } else if viewModel.filteredProfiles.isEmpty {
                 emptyView(
                     title: "Профилей нет",
-                    subtitle: canManage
+                    subtitle: canCreateProfiles
                         ? "Создайте профиль документов ученика."
                         : "Профили документов пока не заполнены.",
                     systemImage: "person.text.rectangle"
@@ -380,7 +387,7 @@ struct DocumentsView: View {
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if canManage {
+                        if canCreateProfiles {
                             Button {
                                 viewModel.errorMessage = nil
                                 editingProfile = profile
@@ -393,7 +400,7 @@ struct DocumentsView: View {
                 }
             }
 
-            if canManage {
+            if canCreateProfiles {
                 Button {
                     viewModel.errorMessage = nil
                     isShowingCreateProfile = true
@@ -423,7 +430,7 @@ struct DocumentsView: View {
                 }
             }
 
-            if canManage {
+            if canCreateProfiles {
                 Button {
                     openGenerate(profileID: nil)
                 } label: {
