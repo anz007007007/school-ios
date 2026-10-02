@@ -247,7 +247,7 @@ struct DashboardTodayScheduleView: View {
                 Spacer()
 
                 NavigationLink {
-                    ScheduleView()
+                    LazyView { ScheduleView() }
                 } label: {
                     Text("Всё расписание")
                         .font(.caption.weight(.semibold))

@@ -178,7 +178,7 @@ struct DashboardView: View {
                 }
 
                 NavigationLink {
-                    ProfileView()
+                    LazyView { ProfileView() }
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: appState.isParent ? "person.2.fill" : "person.badge.key.fill")
@@ -506,7 +506,7 @@ struct DashboardView: View {
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(viewModel.summaryCards.filter { !isDocumentsCard($0.title) }) { card in
                     NavigationLink {
-                        summaryDestination(for: card)
+                        LazyView { summaryDestination(for: card) }
                     } label: {
                         DashboardServerCardView(
                             title: card.title,
@@ -578,7 +578,7 @@ struct DashboardView: View {
 
             LazyVGrid(columns: columns, spacing: 12) {
                 NavigationLink {
-                    AdminView()
+                    LazyView { AdminView() }
                 } label: {
                     DashboardServerCardView(
                         title: "Ученики",
@@ -590,7 +590,7 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
 
                 NavigationLink {
-                    AdminView()
+                    LazyView { AdminView() }
                 } label: {
                     DashboardServerCardView(
                         title: "Активные",
@@ -602,7 +602,7 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
 
                 NavigationLink {
-                    AdminView()
+                    LazyView { AdminView() }
                 } label: {
                     DashboardServerCardView(
                         title: "Учителя",
@@ -614,7 +614,7 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
 
                 NavigationLink {
-                    AdminView()
+                    LazyView { AdminView() }
                 } label: {
                     DashboardServerCardView(
                         title: "Классы",
@@ -626,7 +626,7 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
 
                 NavigationLink {
-                    FinanceView()
+                    LazyView { FinanceView() }
                 } label: {
                     DashboardServerCardView(
                         title: "Долг",
@@ -638,7 +638,7 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
 
                 NavigationLink {
-                    FinanceView()
+                    LazyView { FinanceView() }
                 } label: {
                     DashboardServerCardView(
                         title: "Просрочено",
@@ -734,7 +734,7 @@ struct DashboardView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 if appState.isCook {
                     NavigationLink {
-                        SchoolMenuView()
+                        LazyView { SchoolMenuView() }
                     } label: {
                         FeatureCardView(
                             title: "Меню",
@@ -746,7 +746,7 @@ struct DashboardView: View {
                     }
 
                     NavigationLink {
-                        HealthView()
+                        LazyView { HealthView() }
                     } label: {
                         FeatureCardView(
                             title: "Здоровье",
@@ -759,7 +759,7 @@ struct DashboardView: View {
                 } else {
                     if viewModel.featureEnabled("diary") {
                         NavigationLink {
-                            DiaryView()
+                            LazyView { DiaryView() }
                         } label: {
                             FeatureCardView(
                                 title: "Дневник",
@@ -773,7 +773,7 @@ struct DashboardView: View {
 
                     if viewModel.featureEnabled("homework") {
                         NavigationLink {
-                            HomeworkView()
+                            LazyView { HomeworkView() }
                         } label: {
                             FeatureCardView(
                                 title: "Домашка",
@@ -786,7 +786,7 @@ struct DashboardView: View {
                     }
 
                     NavigationLink {
-                        ScheduleView()
+                        LazyView { ScheduleView() }
                     } label: {
                         FeatureCardView(
                             title: "Расписание",
@@ -799,7 +799,7 @@ struct DashboardView: View {
 
                     if appState.canUsePortfolio {
                         NavigationLink {
-                            PortfolioView()
+                            LazyView { PortfolioView() }
                         } label: {
                             FeatureCardView(
                                 title: "Портфолио",
@@ -813,7 +813,7 @@ struct DashboardView: View {
 
                     if appState.canViewCommunity {
                         NavigationLink {
-                            CommunityView()
+                            LazyView { CommunityView() }
                         } label: {
                             FeatureCardView(
                                 title: "Объявления",
@@ -827,7 +827,7 @@ struct DashboardView: View {
 
                     if appState.canViewTextbooks {
                         NavigationLink {
-                            TextbooksView()
+                            LazyView { TextbooksView() }
                         } label: {
                             FeatureCardView(
                                 title: "Учебники",
@@ -841,7 +841,7 @@ struct DashboardView: View {
 
                     if viewModel.featureEnabled("messages") {
                         NavigationLink {
-                            MessagesView()
+                            LazyView { MessagesView() }
                         } label: {
                             FeatureCardView(
                                 title: "Сообщения",
@@ -855,7 +855,7 @@ struct DashboardView: View {
 
                     if viewModel.featureEnabled("events") {
                         NavigationLink {
-                            EventsView()
+                            LazyView { EventsView() }
                         } label: {
                             FeatureCardView(
                                 title: "События",
@@ -869,7 +869,7 @@ struct DashboardView: View {
 
                     if viewModel.featureEnabled("clubs") {
                         NavigationLink {
-                            ClubsView()
+                            LazyView { ClubsView() }
                         } label: {
                             FeatureCardView(
                                 title: "Кружки",
@@ -882,7 +882,7 @@ struct DashboardView: View {
                     }
 
                     NavigationLink {
-                        SchoolMenuView()
+                        LazyView { SchoolMenuView() }
                     } label: {
                         FeatureCardView(
                             title: "Меню",
@@ -895,7 +895,7 @@ struct DashboardView: View {
 
                     if appState.canViewHealth {
                         NavigationLink {
-                            HealthView()
+                            LazyView { HealthView() }
                         } label: {
                             FeatureCardView(
                                 title: "Здоровье",
@@ -911,7 +911,7 @@ struct DashboardView: View {
                     // раздел открывается только отсюда.
                     if appState.canViewDocuments {
                         NavigationLink {
-                            DocumentsView()
+                            LazyView { DocumentsView() }
                         } label: {
                             FeatureCardView(
                                 title: "Документы",
@@ -925,7 +925,7 @@ struct DashboardView: View {
 
                     if viewModel.featureEnabled("finance") && appState.canUseFinance {
                         NavigationLink {
-                            FinanceView()
+                            LazyView { FinanceView() }
                         } label: {
                             FeatureCardView(
                                 title: "Финансы",
@@ -939,7 +939,7 @@ struct DashboardView: View {
 
                     if appState.isAdmin || appState.isManager {
                         NavigationLink {
-                            AnalyticsView()
+                            LazyView { AnalyticsView() }
                         } label: {
                             FeatureCardView(
                                 title: "Аналитика",
@@ -952,7 +952,7 @@ struct DashboardView: View {
 
                     if appState.canOpenTeacherCabinet {
                         NavigationLink {
-                            TeacherCabinetView()
+                            LazyView { TeacherCabinetView() }
                         } label: {
                             FeatureCardView(
                                 title: "Учителю",
@@ -965,7 +965,7 @@ struct DashboardView: View {
 
                     if appState.isAdmin {
                         NavigationLink {
-                            AdminView()
+                            LazyView { AdminView() }
                         } label: {
                             FeatureCardView(
                                 title: "Админка",
