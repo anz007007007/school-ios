@@ -199,7 +199,7 @@ struct LoginView: View {
             .toggleStyle(.checkboxLike)
             .tint(AppTheme.primaryDark)
 
-            Text("Использование приложения возможно только при принятии указанных условий.")
+            Text("Отметки нужны по закону о персональных данных: с вашим согласием приложение может показывать оценки, расписание и сообщения.")
                 .font(.caption2)
                 .foregroundStyle(AppTheme.muted)
         }
