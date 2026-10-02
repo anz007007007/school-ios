@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		6F26C8B62FBF18F000D4997C /* SchoolAPIClient in Frameworks */ = {isa = PBXBuildFile; productRef = 6F26C8B52FBF18F000D4997C /* SchoolAPIClient */; };
-		6F8549182FCDA3F8008513AA /* SchoolAPIClient in Frameworks */ = {isa = PBXBuildFile; productRef = 6F8549172FCDA3F8008513AA /* SchoolAPIClient */; };
 		784316CCBACF83131A8BC0AE /* Pods_scapp.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B24961B6CAC674D47F67BC02 /* Pods_scapp.framework */; };
 /* End PBXBuildFile section */
 
@@ -45,7 +44,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6F8549182FCDA3F8008513AA /* SchoolAPIClient in Frameworks */,
 				6F26C8B62FBF18F000D4997C /* SchoolAPIClient in Frameworks */,
 				784316CCBACF83131A8BC0AE /* Pods_scapp.framework in Frameworks */,
 			);
@@ -112,7 +110,6 @@
 			name = Scapp;
 			packageProductDependencies = (
 				6F26C8B52FBF18F000D4997C /* SchoolAPIClient */,
-				6F8549172FCDA3F8008513AA /* SchoolAPIClient */,
 			);
 			productName = scapp;
 			productReference = 6FE940BF2FBEFF6500FD151F /* Scapp.app */;
@@ -143,7 +140,7 @@
 			mainGroup = 6FE940B62FBEFF6500FD151F;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6FE940EB2FBF17D000FD151F /* XCLocalSwiftPackageReference "../../SchoolAPIClient" */,
+				6FE940EB2FBF17D000FD151F /* XCLocalSwiftPackageReference "SchoolAPIClient" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6FE940C02FBEFF6500FD151F /* Products */;
@@ -465,19 +462,16 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		6FE940EB2FBF17D000FD151F /* XCLocalSwiftPackageReference "../../SchoolAPIClient" */ = {
+		6FE940EB2FBF17D000FD151F /* XCLocalSwiftPackageReference "SchoolAPIClient" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../SchoolAPIClient;
+			relativePath = SchoolAPIClient;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		6F26C8B52FBF18F000D4997C /* SchoolAPIClient */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = SchoolAPIClient;
-		};
-		6F8549172FCDA3F8008513AA /* SchoolAPIClient */ = {
-			isa = XCSwiftPackageProductDependency;
+			package = 6FE940EB2FBF17D000FD151F /* XCLocalSwiftPackageReference "SchoolAPIClient" */;
 			productName = SchoolAPIClient;
 		};
 /* End XCSwiftPackageProductDependency section */

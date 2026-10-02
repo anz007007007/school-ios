@@ -22,9 +22,9 @@ xcodebuild -workspace scapp.xcworkspace -scheme Scapp \
 
 ## API layer (two parallel mechanisms)
 
-1. **`SchoolAPIClient` local Swift package** at `../../SchoolAPIClient` (referenced by relative path from the xcodeproj). It contains an OpenAPI‑generated client (`swift-openapi-generator`, from `openapi.yaml`) plus a hand-written wrapper `SchoolAPI` (`Sources/SchoolAPIClient/SchoolAPIClient.swift`) that holds the bearer token and exposes a few typed calls (login, current user, etc.). Regenerate with:
+1. **`SchoolAPIClient` local Swift package** in `SchoolAPIClient/` inside this repo (referenced by relative path from the xcodeproj). It contains an OpenAPI‑generated client (`swift-openapi-generator`, from `openapi.yaml`) plus a hand-written wrapper `SchoolAPI` (`Sources/SchoolAPIClient/SchoolAPIClient.swift`) that holds the bearer token and exposes a few typed calls (login, current user, etc.). Regenerate with:
    ```sh
-   cd ../../SchoolAPIClient
+   cd SchoolAPIClient
    rm -rf Sources/SchoolAPIClient/Generated
    swift-openapi-generator generate openapi.yaml --config generate-config.yaml \
      --output-directory ./Sources/SchoolAPIClient/Generated
