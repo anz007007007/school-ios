@@ -37,6 +37,15 @@ struct DashboardView: View {
                             subjectAveragesSection
                         }
 
+                        // Свёрнутое расписание на сегодня перед сводкой: у кого есть уроки.
+                        if appState.isParent || appState.isStudent || appState.isTeacher {
+                            DashboardTodayScheduleView(
+                                isTeacher: appState.isTeacher,
+                                studentID: appState.isParent ? viewModel.selectedStudentID : 0,
+                                waitForStudent: appState.isParent
+                            )
+                        }
+
                         if !viewModel.summaryCards.isEmpty {
                             serverCardsSection
                         } else if let analytics = viewModel.analytics, appState.isAdmin || appState.isManager {
