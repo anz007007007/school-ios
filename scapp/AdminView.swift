@@ -81,6 +81,12 @@ struct AdminView: View {
                     } label: {
                         Label("Учебные периоды", systemImage: "calendar.badge.clock")
                     }
+
+                    NavigationLink {
+                        AdminSettingsView()
+                    } label: {
+                        Label("Настройки", systemImage: "gearshape.fill")
+                    }
                 }
             }
             .appThemedList()

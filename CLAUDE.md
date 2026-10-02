@@ -29,7 +29,7 @@ xcodebuild -workspace scapp.xcworkspace -scheme Scapp \
    swift-openapi-generator generate openapi.yaml --config generate-config.yaml \
      --output-directory ./Sources/SchoolAPIClient/Generated
    ```
-   `API_see_not_for_project/` holds a reference copy of the generated code (not in the build). `scapp/Client.swift` / `scapp/Types.swift` are near-identical copies that *are* compiled into the app target via the synchronized group. All of these are generated (~60k lines): don't hand-edit them and don't read them in full; grep for the schema/operation you need. Feature code uses the package's types (`SchoolAPIClient.Components.Schemas…`).
+   `API_see_not_for_project/` holds a reference copy of the generated code (not in the build). The generated code (~60k lines) lives only in the package: don't hand-edit them and don't read them in full; grep for the schema/operation you need. Feature code uses the package's types (`SchoolAPIClient.Components.Schemas…`).
 
 2. **Hand-rolled REST calls** — the dominant pattern in feature code. Most features use `*DTO.swift` Codable structs (snake_case properties matching JSON) and build requests via `APIRequestService.shared.request/decode(api:path:method:...)`, while many ViewModels still carry their own private `URLSession` helper doing the same thing. Every request must:
    - take the token from `api.authToken` (the `SchoolAPI` instance lives in `AppState.api`, passed into ViewModel methods as `api:`),
@@ -45,4 +45,5 @@ xcodebuild -workspace scapp.xcworkspace -scheme Scapp \
 - Features follow `XxxView` + `XxxViewModel` (`@MainActor final class … ObservableObject`, `@Published` state incl. `isLoading`, `errorMessage`, `successMessage`) + `XxxDTO`, with `XxxFormView` for create/edit sheets. `Admin*` files are the admin panel sections; `Teacher*` the teacher cabinet.
 - Push: `AppDelegate` + `PushNotificationService` (Firebase Messaging); registration is re-ensured on launch, on becoming active, and after login.
 - Styling: use `AppTheme` colors (`AppTheme.swift`, yellow/brown palette). `app.css` is the web frontend's palette kept for reference.
-- Login lockout/remember-login lives in `LoginSecurityService` (UserDefaults).
+- Login lockout/remember-login lives in `LoginSecurityService` (UserDefaults). Consent toggles on the login screen start off on purpose (152-FZ).
+- In Release `print` is a no-op (`ReleaseLogging.swift`), so debug prints never reach device logs.

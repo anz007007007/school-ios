@@ -316,6 +316,8 @@ struct MobileConfigResponseDTO: Decodable, Hashable {
     let api_version: String?
     let user: MobileConfigUserDTO?
     let features: MobileConfigFeaturesDTO?
+    /// Код калитки для вошедших; nil — не задан.
+    let gate_code: String?
 }
 
 struct MobileConfigUserDTO: Decodable, Hashable {
