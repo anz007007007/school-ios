@@ -65,6 +65,15 @@ struct DashboardView: View {
             }
             .scrollContentBackground(.hidden)
             .appScreenBackground()
+            // Праздник по расписанию из админки: лёгкая анимация один раз за запуск.
+            .overlay {
+                HolidayCelebrationView(holidayCode: viewModel.mobileConfig?.app_icon)
+            }
+            .onChange(of: viewModel.mobileConfig?.app_icon) { _, code in
+                if viewModel.mobileConfig != nil {
+                    AppIconSwitcher.apply(code)
+                }
+            }
             .alert("Доступна новая версия", isPresented: updateAlertBinding) {
                 if let url = viewModel.mobileConfig?.store_url.flatMap(URL.init(string:)) {
                     Button("Обновить") {

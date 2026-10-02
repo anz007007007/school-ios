@@ -347,6 +347,7 @@
 			baseConfigurationReference = A1EB3CC55E30D6CA1AB7D835 /* Pods-scapp.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = scapp/scapp.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -395,6 +396,7 @@
 			baseConfigurationReference = 9E194A923163C29F239133A4 /* Pods-scapp.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = scapp/scapp.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";

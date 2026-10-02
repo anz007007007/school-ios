@@ -321,6 +321,8 @@ struct MobileConfigResponseDTO: Decodable, Hashable {
     /// Сборка ниже минимальной — предложить обновиться.
     let update_required: Bool?
     let store_url: String?
+    /// Праздник по расписанию из админки (иконка и анимация) или "default".
+    let app_icon: String?
 }
 
 struct MobileConfigUserDTO: Decodable, Hashable {
