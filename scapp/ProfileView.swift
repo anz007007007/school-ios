@@ -331,6 +331,15 @@ struct ProfileView: View {
                 ]
             )
 
+            // Сохранённый для автовхода и Face ID пароль иначе остался бы старым:
+            // следующий запуск получил бы 401 и тратил попытки до блокировки.
+            let security = LoginSecurityService.shared
+            if let saved = try? security.loadCredentials() {
+                try? security.saveCredentials(
+                    LoginSecurityService.Credentials(login: saved.login, password: formData.newPassword)
+                )
+            }
+
             successMessage = "Пароль изменён"
             isShowingChangePassword = false
         } catch {

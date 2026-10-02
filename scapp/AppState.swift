@@ -1317,14 +1317,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Feature permissions
 
-    /// homework.py: создание по праву homework.manage.
+    /// homework.py: создание по праву homework.manage (одной роли учителя мало).
     var canManageHomework: Bool {
-        hasRole("admin", "teacher") || hasPermission("homework", level: .manage)
+        isAdmin || hasPermission("homework", level: .manage)
     }
 
     /// events.py: управлять событиями могут admin/manager и учитель с правом events.manage.
     var canManageEvents: Bool {
-        isAdmin || isManager || (isTeacher && hasAnyPermission([
+        isAdmin || (hasRole("manager", "teacher") && hasAnyPermission([
             "events.manage",
             "events:manage",
             "events:create",
@@ -1336,7 +1336,7 @@ final class AppState: ObservableObject {
 
     /// clubs.py: создавать и менять кружки могут admin/manager и учитель с правом clubs.manage.
     var canManageClubs: Bool {
-        isAdmin || isManager || (isTeacher && hasAnyPermission([
+        isAdmin || (hasRole("manager", "teacher") && hasAnyPermission([
             "clubs.manage",
             "clubs:manage",
             "clubs:create",
@@ -1348,7 +1348,7 @@ final class AppState: ObservableObject {
 
     /// clubs.py _ensure_can_manage_club: учитель меняет, удаляет и записывает учеников только в свои кружки.
     func canManageClub(_ club: ClubDTO) -> Bool {
-        if isAdmin || isManager {
+        if isAdmin || (isManager && canManageClubs) {
             return true
         }
 
@@ -1379,7 +1379,7 @@ final class AppState: ObservableObject {
 
     /// messages.py: объявления — events.manage и роль admin/manager/teacher.
     var canCreateAnnouncements: Bool {
-        isAdminOrManager || (isTeacher && hasPermission("events", level: .manage))
+        isAdmin || (hasRole("manager", "teacher") && hasPermission("events", level: .manage))
     }
 
     /// finance.py: смотреть admin/manager/parent (ученику раздел не показываем).
@@ -1389,16 +1389,16 @@ final class AppState: ObservableObject {
 
     /// finance.py: управлять — finance.manage и роль admin/manager; одного права мало.
     var canManageFinance: Bool {
-        isAdminOrManager
+        isAdmin || (isManager && hasPermission("finance", level: .manage))
     }
 
     var canSelfEnrollClubs: Bool {
         isParent
     }
 
-    /// menu.py: menu.manage и роль admin/manager/cook. Проверяем роль.
+    /// menu.py: menu.manage и роль admin/manager/cook.
     var canManageMenu: Bool {
-        hasRole("admin", "manager", "cook")
+        isAdmin || (hasRole("manager", "cook") && hasPermission("menu", level: .manage))
     }
 
     /// health.py: проверка только по роли (права medical.* сервер не смотрит).
@@ -1424,7 +1424,7 @@ final class AppState: ObservableObject {
 
     /// documents.py: documents.manage и роль admin/manager.
     var canManageDocuments: Bool {
-        isAdminOrManager
+        isAdmin || (isManager && hasPermission("documents", level: .manage))
     }
 
     /// textbooks.py: смотреть все, кроме повара; управлять admin/manager.
@@ -1446,8 +1446,9 @@ final class AppState: ObservableObject {
         hasRole("admin", "manager", "teacher", "parent")
     }
 
+    /// community_ads.py: school.manage и роль admin/manager.
     var canManageCommunity: Bool {
-        isAdminOrManager
+        isAdmin || (isManager && hasPermission("school", level: .manage))
     }
 
     /// Можно ли открыть раздел, в который ведёт уведомление. Иначе открываем
