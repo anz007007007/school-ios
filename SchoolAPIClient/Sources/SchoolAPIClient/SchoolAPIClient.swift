@@ -3,8 +3,16 @@ import OpenAPIRuntime
 import OpenAPIURLSession
 import HTTPTypes
 
+/// Токен читает middleware в потоке URLSession, а пишут login/logout на главном —
+/// доступ под замком, иначе это гонка данных.
 private final class AuthTokenStorage: @unchecked Sendable {
-    var token: String?
+    private let lock = NSLock()
+    private var storedToken: String?
+
+    var token: String? {
+        get { lock.withLock { storedToken } }
+        set { lock.withLock { storedToken = newValue } }
+    }
 }
 
 private struct AuthMiddleware: ClientMiddleware {
@@ -21,6 +29,12 @@ private struct AuthMiddleware: ClientMiddleware {
 
         if let token = tokenStorage.token {
             request.headerFields[.authorization] = "Bearer \(token)"
+        }
+
+        // Как applyMobileClientHeaders() в приложении: сервер по ним отличает мобильный клиент.
+        if let clientType = HTTPField.Name("x-client-type"), let platform = HTTPField.Name("x-platform") {
+            request.headerFields[clientType] = "mobile"
+            request.headerFields[platform] = "ios"
         }
 
         return try await next(request, body, baseURL)
@@ -61,12 +75,14 @@ public final class SchoolAPI {
         personalDataAgreement: Bool = true,
         termsAgreement: Bool = true
     ) async throws -> Components.Schemas.TokenResponse {
+        #if DEBUG
         print("LOGIN BODY:", [
             "login": login,
             "password": "***",
             "personal_data_agreement": personalDataAgreement,
             "terms_agreement": termsAgreement
         ])
+        #endif
 
         let request = Components.Schemas.LoginRequest(
             login: login,
