@@ -1,10 +1,12 @@
 import SwiftUI
 import AVKit
+import Combine
 import SchoolAPIClient
 
 struct CamerasView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = CamerasViewModel()
+    @StateObject private var playerCoordinator = CameraGridPlayerCoordinator()
 
     @State private var selectedCamera: CameraDTO?
 
@@ -25,6 +27,12 @@ struct CamerasView: View {
             .sheet(item: $selectedCamera) { camera in
                 CameraPlayerSheet(camera: camera, api: appState.api)
             }
+            .onDisappear {
+                // Уходим с экрана «Камеры» целиком (переход назад/на другую вкладку) —
+                // на всякий случай останавливаем всё, что ещё числится активным, не
+                // полагаясь только на onDisappear отдельных ячеек сетки.
+                playerCoordinator.stopAll()
+            }
     }
 
     @ViewBuilder
@@ -43,16 +51,27 @@ struct CamerasView: View {
         } else if viewModel.shouldShowComingSoonBanner {
             comingSoonBanner
         } else {
-            List {
-                Section("Камеры") {
+            ScrollView {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ],
+                    spacing: 12
+                ) {
                     ForEach(viewModel.cameras) { camera in
-                        CameraRowView(camera: camera) {
+                        CameraGridCell(
+                            camera: camera,
+                            api: appState.api,
+                            coordinator: playerCoordinator
+                        ) {
                             selectedCamera = camera
                         }
                     }
                 }
+                .padding(16)
             }
-            .appThemedList()
+            .appScreenBackground()
         }
     }
 
@@ -100,46 +119,244 @@ struct CamerasView: View {
     }
 }
 
-private struct CameraRowView: View {
+/// Простой арбитр для сетки камер: ограничивает число одновременно активных
+/// (реально стримящих) плееров в сетке, чтобы не перегружать сеть/декодер,
+/// когда камер много. Полноэкранный просмотр (CameraPlayerSheet) в этот лимит
+/// не считается — там всегда ровно один плеер.
+@MainActor
+final class CameraGridPlayerCoordinator: ObservableObject {
+    static let maxActivePlayers = 8
+
+    private var activeCameraIDs: Set<Int> = []
+
+    /// Пытается занять слот под камеру. true — слот занят, можно стартовать плеер;
+    /// false — лимит исчерпан, ячейка должна остаться статичной.
+    func tryActivate(_ cameraID: Int) -> Bool {
+        if activeCameraIDs.contains(cameraID) {
+            return true
+        }
+
+        guard activeCameraIDs.count < Self.maxActivePlayers else {
+            return false
+        }
+
+        activeCameraIDs.insert(cameraID)
+        return true
+    }
+
+    func deactivate(_ cameraID: Int) {
+        activeCameraIDs.remove(cameraID)
+    }
+
+    /// Вызывается при уходе со всего экрана «Камеры» — просто сбрасывает учёт;
+    /// сами плееры останавливают себя в onDisappear каждой ячейки.
+    func stopAll() {
+        activeCameraIDs.removeAll()
+    }
+}
+
+/// Лёгкая обёртка над AVPlayerLayer: в отличие от AVKit.VideoPlayer не рисует
+/// системные элементы управления поверх — для мозаики из нескольких камер они
+/// только мешали бы (и перехватывали тап, нужный для перехода в полноэкранный режим).
+private struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.isUserInteractionEnabled = false
+        view.playerLayer.videoGravity = .resizeAspectFill
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        uiView.playerLayer.player = player
+    }
+
+    final class PlayerContainerView: UIView {
+        override static var layerClass: AnyClass { AVPlayerLayer.self }
+
+        var playerLayer: AVPlayerLayer {
+            // swiftlint:disable:next force_cast
+            layer as! AVPlayerLayer
+        }
+    }
+}
+
+/// Одна ячейка мозаики: карточка 16:9 с именем камеры и встроенным немым
+/// плеером. Плеер создаётся лениво в .task (ячейка появилась на экране) и
+/// освобождается в .onDisappear (ячейка ушла из дерева) — несколько ячеек
+/// могут стримить параллельно, в отличие от прежнего «один плеер в sheet».
+private struct CameraGridCell: View {
     let camera: CameraDTO
+    let api: SchoolAPI
+    @ObservedObject var coordinator: CameraGridPlayerCoordinator
     let onTap: () -> Void
+
+    @State private var player: AVPlayer?
+    @State private var isChecking = false
+    @State private var errorMessage: String?
+    @State private var statusObservation: NSKeyValueObservation?
+    @State private var didRequestActivation = false
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill((camera.stream_available ? AppTheme.control : AppTheme.muted).opacity(0.14))
-                        .frame(width: 48, height: 48)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.black)
 
-                    Image(systemName: camera.stream_available ? "video.fill" : "video.slash.fill")
-                        .font(.title3)
-                        .foregroundStyle(camera.stream_available ? AppTheme.control : AppTheme.muted)
+                if let player {
+                    PlayerLayerView(player: player)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                } else if isChecking {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    VStack(spacing: 6) {
+                        Image(systemName: camera.stream_available ? "video.fill" : "video.slash.fill")
+                            .font(.title3)
+                            .foregroundStyle(.white.opacity(0.85))
+
+                        Text(placeholderText)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                    }
+                    .padding(.horizontal, 10)
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(camera.name)
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.text)
+                VStack {
+                    Spacer()
 
-                    Text(camera.stream_available ? "Нажмите, чтобы посмотреть" : "Видео временно недоступно")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
-                }
+                    HStack {
+                        Text(camera.name)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
 
-                Spacer()
-
-                if camera.stream_available {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote)
-                        .foregroundStyle(AppTheme.muted)
+                        Spacer()
+                    }
+                    .padding(8)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0), Color.black.opacity(0.7)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
                 }
             }
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
         .disabled(!camera.stream_available)
+        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+        .task {
+            await activateIfNeeded()
+        }
+        .onDisappear {
+            release()
+        }
+    }
+
+    private var placeholderText: String {
+        if !camera.stream_available {
+            return "Скоро"
+        }
+
+        if let errorMessage {
+            return errorMessage
+        }
+
+        return "Нажмите, чтобы посмотреть"
+    }
+
+    /// Ленивый запуск: срабатывает, когда ячейка впервые появилась в дереве.
+    /// Сначала занимаем слот у координатора (лимит одновременных плееров),
+    /// затем — тот же preflight-GET к stream.m3u8, что и раньше в sheet.
+    private func activateIfNeeded() async {
+        guard camera.stream_available, !didRequestActivation else {
+            return
+        }
+
+        didRequestActivation = true
+
+        guard coordinator.tryActivate(camera.id) else {
+            // Лимит исчерпан — остаёмся статичной карточкой, запуск только по тапу
+            // (тап откроет полноэкранный просмотр этой камеры отдельно от сетки).
+            return
+        }
+
+        isChecking = true
+        errorMessage = nil
+
+        let result = await CamerasViewModel.checkStreamAvailability(api: api, cameraID: camera.id)
+
+        guard !Task.isCancelled else {
+            return
+        }
+
+        switch result {
+        case .available(let url):
+            guard let token = api.authToken else {
+                errorMessage = "Сессия истекла. Войдите снова."
+                isChecking = false
+                coordinator.deactivate(camera.id)
+                return
+            }
+
+            var headers = MobileClientInfo.headers
+            headers["Authorization"] = "Bearer \(token)"
+
+            let asset = AVURLAsset(url: url, options: [
+                "AVURLAssetHTTPHeaderFieldsKey": headers
+            ])
+            let item = AVPlayerItem(asset: asset)
+            observeFailure(of: item)
+
+            let newPlayer = AVPlayer(playerItem: item)
+            newPlayer.isMuted = true
+            newPlayer.volume = 0
+            player = newPlayer
+            isChecking = false
+            newPlayer.play()
+
+        case .unavailable(let message):
+            errorMessage = message
+            isChecking = false
+            coordinator.deactivate(camera.id)
+        }
+    }
+
+    /// Поток оборвался уже во время показа (например, медиа-сервер упал) —
+    /// показываем понятный текст в самой ячейке вместо зависшего чёрного кадра.
+    private func observeFailure(of item: AVPlayerItem) {
+        statusObservation = item.observe(\.status, options: [.new]) { item, _ in
+            guard item.status == .failed else {
+                return
+            }
+
+            Task { @MainActor in
+                errorMessage = "Видео временно недоступно."
+                player = nil
+                coordinator.deactivate(camera.id)
+            }
+        }
+    }
+
+    private func release() {
+        statusObservation?.invalidate()
+        statusObservation = nil
+        player?.pause()
+        player = nil
+        isChecking = false
+
+        if didRequestActivation {
+            coordinator.deactivate(camera.id)
+            didRequestActivation = false
+        }
     }
 }
 
