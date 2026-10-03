@@ -57,6 +57,10 @@ struct EventsView: View {
             .task {
                 await viewModel.loadInitialData(api: appState.api)
 
+                if appState.canChooseDivisionAudience {
+                    await DivisionsStore.shared.load(api: appState.api)
+                }
+
                 Task {
                     await markEventsNotificationsRead()
                 }
@@ -160,7 +164,8 @@ struct EventsView: View {
                             startsAt: formData.startsAt,
                             description: String(formData.description),
                             classIDs: Array(formData.classIDs),
-                            studentIDs: Array(formData.studentIDs)
+                            studentIDs: Array(formData.studentIDs),
+                            divisionIDs: formData.divisionIDs
                         )
 
                         Task { @MainActor in
@@ -205,7 +210,8 @@ struct EventsView: View {
                             startsAt: formData.startsAt,
                             description: String(formData.description),
                             classIDs: Array(formData.classIDs),
-                            studentIDs: Array(formData.studentIDs)
+                            studentIDs: Array(formData.studentIDs),
+                            divisionIDs: formData.divisionIDs
                         )
 
                         Task { @MainActor in
@@ -644,6 +650,8 @@ struct EventTimelineRowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+
+                DivisionAudienceLabel(divisionIDs: event.division_ids)
 
                 participationView
                 feedbackView

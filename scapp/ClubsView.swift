@@ -59,6 +59,10 @@ struct ClubsView: View {
             }
             .task {
                 await viewModel.loadInitialData(api: appState.api)
+
+                if appState.canChooseDivisionAudience {
+                    await DivisionsStore.shared.load(api: appState.api)
+                }
             }
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -188,7 +192,8 @@ struct ClubsView: View {
                             priceAmount: String(formData.priceAmount),
                             paymentType: String(formData.paymentType),
                             teacherID: formData.teacherID,
-                            status: String(formData.status)
+                            status: String(formData.status),
+                            divisionIDs: formData.divisionIDs
                         )
 
                         Task { @MainActor in
@@ -219,7 +224,8 @@ struct ClubsView: View {
                             priceAmount: String(formData.priceAmount),
                             paymentType: String(formData.paymentType),
                             teacherID: formData.teacherID,
-                            status: String(formData.status)
+                            status: String(formData.status),
+                            divisionIDs: formData.divisionIDs
                         )
 
                         Task { @MainActor in
@@ -741,6 +747,8 @@ struct ClubTimelineRowView: View {
                 Label(club.teacher_name, systemImage: "person.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                DivisionAudienceLabel(divisionIDs: club.division_ids)
 
                 capacityView
             }

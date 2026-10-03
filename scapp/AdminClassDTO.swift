@@ -15,6 +15,10 @@ struct AdminClassDTO: Codable, Identifiable, Hashable {
     let curator_user_id: Int?
     let curator_name: String?
 
+    /// Подразделение (новые серверы; старые поле не присылают).
+    var division_id: Int? = nil
+    var division_name: String? = nil
+
     var curatorText: String {
         let cleanName = curator_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 

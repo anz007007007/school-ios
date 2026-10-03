@@ -376,7 +376,8 @@ final class EventsViewModel: ObservableObject {
                     startsAt: formData.startsAt,
                     description: cleanDescription,
                     classIDs: uniqueClassIDs,
-                    studentIDs: uniqueStudentIDs
+                    studentIDs: uniqueStudentIDs,
+                    divisionIDs: formData.divisionIDs
                 )
             } else {
                 // Сервер принимает одного ученика (student_id), остальных добавляем через /participants.
@@ -391,6 +392,8 @@ final class EventsViewModel: ObservableObject {
                 if let mainStudentID = uniqueStudentIDs.first {
                     body["student_id"] = mainStudentID
                 }
+
+                body.setDivisionIDs(formData.divisionIDs)
 
                 let data = try await sendRequest(
                     api: api,
@@ -442,7 +445,8 @@ final class EventsViewModel: ObservableObject {
         startsAt: Date,
         description: String,
         classIDs: [Int],
-        studentIDs: [Int]
+        studentIDs: [Int],
+        divisionIDs: [Int]? = nil
     ) async throws {
         let original = events.first { $0.id == eventID }
         let originalClassIDs = original?.formClassIDs(classes: filterClasses) ?? []
@@ -468,6 +472,8 @@ final class EventsViewModel: ObservableObject {
         if classesChanged {
             body["class_ids"] = classIDs
         }
+
+        body.setDivisionIDs(divisionIDs)
 
         if studentsChanged || classesChanged {
             if let mainStudentID {

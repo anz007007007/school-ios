@@ -212,6 +212,8 @@ final class TextbooksViewModel: ObservableObject {
             body["subject_id"] = formData.subjectID
         }
 
+        body.setDivisionIDs(formData.divisionIDs)
+
         do {
             _ = try await APIRequestService.shared.request(
                 api: api,
@@ -340,6 +342,11 @@ final class TextbooksViewModel: ObservableObject {
 
         appendTextField(name: "sort_order", value: "\(formData.sortOrder)", boundary: boundary, body: &body)
         appendTextField(name: "is_active", value: formData.isActive ? "true" : "false", boundary: boundary, body: &body)
+
+        // Пустой список в multipart не передать: без поля сервер считает «вся школа».
+        for divisionID in formData.divisionIDs ?? [] {
+            appendTextField(name: "division_ids", value: "\(divisionID)", boundary: boundary, body: &body)
+        }
 
         if let fileURL = formData.fileURL {
             let fileData = try readFileData(from: fileURL)

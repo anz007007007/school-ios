@@ -513,6 +513,8 @@ final class MessagesViewModel: ObservableObject {
                 body["target_role_code"] = roleCode
             }
 
+            body.setDivisionIDs(formData.divisionIDs)
+
             _ = try await sendRequest(
                 api: api,
                 path: "/api/v1/messages/announcements",

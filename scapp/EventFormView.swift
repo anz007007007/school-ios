@@ -25,6 +25,7 @@ struct EventFormView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
 
     let mode: Mode
     let event: EventTimelineDTO?
@@ -47,6 +48,7 @@ struct EventFormView: View {
     @State private var selectedStudentIDs: Set<Int>
     @State private var validationMessage: String?
     @State private var isLoadingStudents = false
+    @State private var divisionAudience: DivisionAudience
 
     init(
         mode: Mode,
@@ -79,6 +81,7 @@ struct EventFormView: View {
         _description = State(initialValue: event?.description ?? "")
         _selectedClassIDs = State(initialValue: Set(event?.formClassIDs(classes: classes) ?? []))
         _selectedStudentIDs = State(initialValue: Set(event?.student_id.map { [$0] } ?? []))
+        _divisionAudience = State(initialValue: DivisionAudience(divisionIDs: event?.division_ids))
     }
 
     var body: some View {
@@ -86,6 +89,7 @@ struct EventFormView: View {
             Form {
                 mainSection
                 audienceSection
+                DivisionAudienceSection(audience: $divisionAudience)
 
                 if let validationMessage {
                     Section {
@@ -105,6 +109,7 @@ struct EventFormView: View {
                     }
                 }
             }
+            .loadsDivisionAudience()
             .navigationTitle(mode.title)
             .navigationBarTitleDisplayMode(.inline)
             .task {
@@ -266,7 +271,8 @@ struct EventFormView: View {
             startsAt: startsAt,
             description: cleanDescription,
             classIDs: Array(selectedClassIDs).sorted(),
-            studentIDs: Array(selectedStudentIDs).sorted()
+            studentIDs: Array(selectedStudentIDs).sorted(),
+            divisionIDs: divisionAudience.payload(appState: appState)
         )
 
         onSave(formData)

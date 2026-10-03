@@ -25,6 +25,7 @@ struct WeeklyMenuItemFormView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
 
     let mode: Mode
     let item: WeeklyMenuItemDTO?
@@ -41,6 +42,7 @@ struct WeeklyMenuItemFormView: View {
     @State private var dishID: Int
     @State private var classID: Int
     @State private var validationMessage: String?
+    @State private var divisionAudience: DivisionAudience
 
     init(
         mode: Mode,
@@ -67,6 +69,7 @@ struct WeeklyMenuItemFormView: View {
         _mealType = State(initialValue: item?.meal_type ?? mealTypes.first?.code ?? "breakfast")
         _dishID = State(initialValue: item?.dish_id ?? dishes.first?.id ?? 0)
         _classID = State(initialValue: item?.class_id ?? 0)
+        _divisionAudience = State(initialValue: DivisionAudience(divisionIDs: item?.division_ids))
     }
 
     var body: some View {
@@ -109,6 +112,11 @@ struct WeeklyMenuItemFormView: View {
                     }
                 }
 
+                // Подразделения — только у общих позиций; позиция класса видна по правилам класса.
+                if classID == 0 {
+                    DivisionAudienceSection(audience: $divisionAudience)
+                }
+
                 if let selectedDish {
                     Section("Информация о блюде") {
                         LabeledContent("Название", value: selectedDish.name)
@@ -145,6 +153,7 @@ struct WeeklyMenuItemFormView: View {
                     }
                 }
             }
+            .loadsDivisionAudience()
             .navigationTitle(mode.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -192,7 +201,8 @@ struct WeeklyMenuItemFormView: View {
             menuDate: menuDate.trimmingCharacters(in: .whitespacesAndNewlines),
             mealType: mealType,
             dishID: dishID,
-            classID: classID == 0 ? nil : classID
+            classID: classID == 0 ? nil : classID,
+            divisionIDs: classID == 0 ? divisionAudience.payload(appState: appState) : nil
         )
 
         onSave(formData)

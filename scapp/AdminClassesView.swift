@@ -142,6 +142,7 @@ struct AdminClassesView: View {
 
 struct AdminClassRowView: View {
     let item: AdminClassDTO
+    @ObservedObject var divisionsStore = DivisionsStore.shared
 
     var body: some View {
         HStack(spacing: 12) {
@@ -166,6 +167,15 @@ struct AdminClassRowView: View {
                 Text("Куратор: \(item.curatorText)")
                     .font(.caption)
                     .foregroundStyle(AppTheme.control)
+
+                if divisionsStore.isUsable,
+                   let divisionName = item.division_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !divisionName.isEmpty {
+                    Label(divisionName, systemImage: "building.2")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
@@ -259,7 +269,8 @@ struct AdminCreateClassView: View {
                                 name: formData.name,
                                 educationLevel: formData.educationLevel,
                                 academicYear: formData.academicYear,
-                                curatorTeacherID: formData.curatorTeacherID
+                                curatorTeacherID: formData.curatorTeacherID,
+                                divisionID: formData.divisionID
                             )
 
                             if success {
@@ -304,7 +315,8 @@ struct AdminEditClassView: View {
                 name: item.name,
                 educationLevel: item.education_level,
                 academicYear: item.academic_year,
-                curatorTeacherID: item.curator_teacher_id ?? 0
+                curatorTeacherID: item.curator_teacher_id ?? 0,
+                divisionID: item.division_id ?? 0
             )
         )
     }
@@ -313,7 +325,8 @@ struct AdminEditClassView: View {
         NavigationStack {
             AdminClassFormView(
                 formData: $formData,
-                teachers: viewModel.teachers
+                teachers: viewModel.teachers,
+                originalDivisionID: item.division_id
             )
             .appThemedForm()
             .navigationTitle("Редактирование")
@@ -333,7 +346,9 @@ struct AdminEditClassView: View {
                                 name: formData.name,
                                 educationLevel: formData.educationLevel,
                                 academicYear: formData.academicYear,
-                                curatorTeacherID: formData.curatorTeacherID
+                                curatorTeacherID: formData.curatorTeacherID,
+                                divisionID: formData.divisionID,
+                                originalDivisionID: item.division_id
                             )
 
                             if success {

@@ -17,6 +17,7 @@ struct PublicDocumentFormView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
 
     let mode: Mode
     let document: PublicDocumentDTO?
@@ -29,6 +30,7 @@ struct PublicDocumentFormView: View {
     @State private var descriptionText: String
     @State private var fileURL: String
     @State private var validationMessage: String?
+    @State private var divisionAudience: DivisionAudience
 
     init(
         mode: Mode,
@@ -47,6 +49,7 @@ struct PublicDocumentFormView: View {
         _isPublic = State(initialValue: document?.is_public ?? true)
         _descriptionText = State(initialValue: document?.description ?? "")
         _fileURL = State(initialValue: document?.file_url ?? "")
+        _divisionAudience = State(initialValue: DivisionAudience(divisionIDs: document?.division_ids))
     }
 
     var body: some View {
@@ -70,6 +73,8 @@ struct PublicDocumentFormView: View {
                         .autocorrectionDisabled()
                 }
 
+                DivisionAudienceSection(audience: $divisionAudience)
+
                 if let validationMessage {
                     Section {
                         Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -89,6 +94,7 @@ struct PublicDocumentFormView: View {
                 }
             }
             .appThemedForm()
+            .loadsDivisionAudience()
             .navigationTitle(mode.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -129,7 +135,8 @@ struct PublicDocumentFormView: View {
             title: cleanTitle,
             description: descriptionText,
             fileURL: fileURL,
-            isPublic: isPublic
+            isPublic: isPublic,
+            divisionIDs: divisionAudience.payload(appState: appState)
         )
 
         Task {

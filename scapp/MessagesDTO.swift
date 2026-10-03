@@ -170,6 +170,8 @@ struct AnnouncementDTO: Codable, Identifiable, Hashable {
     let created_at: String
     let class_name: String?
     let author_name: String
+    /// Подразделения ([] — вся школа); старые серверы поле не присылают.
+    var division_ids: [Int]? = nil
 }
 
 struct AnnouncementFormData: Hashable {
@@ -177,6 +179,8 @@ struct AnnouncementFormData: Hashable {
     let body: String
     let targetAudience: String
     let isImportant: Bool
+    /// «Для кого»: nil — не отправлять, [] — вся школа.
+    var divisionIDs: [Int]? = nil
 }
 
 struct AnnouncementCreateRequestDTO: Codable {

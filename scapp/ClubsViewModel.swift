@@ -317,7 +317,7 @@ final class ClubsViewModel: ObservableObject {
 
         do {
             for weekday in formData.weekdayIDs {
-                let body = clubRequestBody(
+                var body = clubRequestBody(
                     name: cleanName,
                     description: cleanDescription,
                     weekday: weekday,
@@ -329,6 +329,8 @@ final class ClubsViewModel: ObservableObject {
                     teacherID: formData.teacherID,
                     status: formData.status
                 )
+
+                body.setDivisionIDs(formData.divisionIDs)
 
                 _ = try await sendRequest(
                     api: api,
@@ -393,7 +395,7 @@ final class ClubsViewModel: ObservableObject {
         }
 
         do {
-            let body = clubRequestBody(
+            var body = clubRequestBody(
                 name: cleanName,
                 description: cleanDescription,
                 weekday: weekday,
@@ -405,6 +407,8 @@ final class ClubsViewModel: ObservableObject {
                 teacherID: formData.teacherID,
                 status: formData.status
             )
+
+            body.setDivisionIDs(formData.divisionIDs)
 
             _ = try await sendRequest(
                 api: api,

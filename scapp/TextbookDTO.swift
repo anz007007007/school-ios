@@ -18,8 +18,11 @@ struct TextbookDTO: Decodable, Identifiable, Hashable {
     let file_url: String?
     let created_at: String?
     let updated_at: String?
+    /// Подразделения ([] — вся школа); старые серверы поле не присылают.
+    let division_ids: [Int]?
 
     enum CodingKeys: String, CodingKey {
+        case division_ids
         case id
         case title
         case description
@@ -210,6 +213,10 @@ struct TextbookFormData: Hashable {
     var sortOrder: Int
     var isActive: Bool
     var fileURL: URL?
+    /// «Для кого» (только для материалов без класса).
+    var divisionAudience = DivisionAudience()
+    /// Итоговое значение division_ids: nil — не отправлять.
+    var divisionIDs: [Int]? = nil
 }
 
 private extension KeyedDecodingContainer {

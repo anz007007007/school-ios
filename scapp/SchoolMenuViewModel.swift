@@ -471,12 +471,14 @@ final class SchoolMenuViewModel: ObservableObject {
         }
 
         do {
-            let body: [String: Any] = [
+            var body: [String: Any] = [
                 "menu_date": formData.menuDate,
                 "meal_type": formData.mealType,
                 "dish_id": formData.dishID,
                 "class_id": formData.classID as Any
             ]
+
+            body.setDivisionIDs(formData.divisionIDs)
 
             _ = try await sendRequest(
                 api: api,
@@ -513,12 +515,14 @@ final class SchoolMenuViewModel: ObservableObject {
         }
 
         do {
-            let body: [String: Any] = [
+            var body: [String: Any] = [
                 "menu_date": formData.menuDate,
                 "meal_type": formData.mealType,
                 "dish_id": formData.dishID,
                 "class_id": formData.classID as Any
             ]
+
+            body.setDivisionIDs(formData.divisionIDs)
 
             _ = try await sendRequest(
                 api: api,

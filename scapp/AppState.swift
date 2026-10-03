@@ -1454,6 +1454,11 @@ final class AppState: ObservableObject {
         hasRole("admin", "manager", "teacher", "parent")
     }
 
+    /// divisions: выбор «Для кого» (подразделения) в формах контента — только admin/manager.
+    var canChooseDivisionAudience: Bool {
+        isAdminOrManager
+    }
+
     /// community_ads.py: school.manage и роль admin/manager.
     var canManageCommunity: Bool {
         isAdmin || (isManager && hasPermission("school", level: .manage))

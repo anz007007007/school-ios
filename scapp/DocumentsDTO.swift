@@ -321,6 +321,8 @@ struct PublicDocumentDTO: Codable, Identifiable, Hashable {
     let updated_at: String?
     let class_name: String?
     let author_name: String?
+    /// Подразделения ([] — вся школа); старые серверы поле не присылают.
+    var division_ids: [Int]? = nil
 
     var isPublic: Bool {
         is_public ?? false
@@ -332,6 +334,8 @@ struct PublicDocumentFormData: Hashable {
     let description: String
     let fileURL: String
     let isPublic: Bool
+    /// «Для кого»: nil — не менять, [] — вся школа.
+    var divisionIDs: [Int]? = nil
 
     /// PublicDocumentCreateRequest.
     var createBody: [String: Any] {
@@ -348,6 +352,7 @@ struct PublicDocumentFormData: Hashable {
             body["file_url"] = fileURL
         }
 
+        body.setDivisionIDs(divisionIDs)
         return body
     }
 
@@ -371,6 +376,7 @@ struct PublicDocumentFormData: Hashable {
             body["clear_file_url"] = true
         }
 
+        body.setDivisionIDs(divisionIDs)
         return body
     }
 }

@@ -386,7 +386,8 @@ struct TextbookFormView: View {
                 subjectID: item?.subject_id ?? 0,
                 sortOrder: item?.sort_order ?? 10,
                 isActive: item?.is_active ?? true,
-                fileURL: nil
+                fileURL: nil,
+                divisionAudience: DivisionAudience(divisionIDs: item?.division_ids)
             )
         )
     }
@@ -439,6 +440,11 @@ struct TextbookFormView: View {
                     Toggle("Активен", isOn: $formData.isActive)
                 }
 
+                // Материал класса виден по правилам класса — «Для кого» только у общих.
+                if formData.classID == 0 {
+                    DivisionAudienceSection(audience: $formData.divisionAudience)
+                }
+
                 Section("Файл") {
                     Button {
                         showFileImporter = true
@@ -483,6 +489,7 @@ struct TextbookFormView: View {
                 }
             }
             .appThemedForm()
+            .loadsDivisionAudience()
             .navigationTitle(mode == .create ? "Новый учебник" : "Учебник")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -610,6 +617,10 @@ struct TextbookFormView: View {
             validationMessage = "Выберите файл учебника."
             return
         }
+
+        formData.divisionIDs = formData.classID == 0
+            ? formData.divisionAudience.payload(appState: appState)
+            : nil
 
         Task {
             let success: Bool

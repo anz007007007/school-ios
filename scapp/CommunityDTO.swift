@@ -182,6 +182,8 @@ struct CommunitySchoolNeedDTO: Identifiable, Decodable, Hashable {
     let priority: Int?
     let created_at: String?
     let updated_at: String?
+    /// Подразделения ([] — вся школа); старые серверы поле не присылают.
+    let division_ids: [Int]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -189,6 +191,7 @@ struct CommunitySchoolNeedDTO: Identifiable, Decodable, Hashable {
         case description
         case image_url
         case image
+        case division_ids
         case need_type
         case goal_amount
         case collected_amount
@@ -223,6 +226,7 @@ struct CommunitySchoolNeedDTO: Identifiable, Decodable, Hashable {
         priority = try container.decodeFlexibleInt(forKey: .priority)
         created_at = try container.decodeFlexibleString(forKey: .created_at)
         updated_at = try container.decodeFlexibleString(forKey: .updated_at)
+        division_ids = try? container.decodeIfPresent([Int].self, forKey: .division_ids)
     }
 
     var imageURL: URL? {
@@ -296,6 +300,8 @@ struct CommunityAdminPromoDTO: Identifiable, Decodable, Hashable {
     let published_at: String?
     let created_at: String?
     let updated_at: String?
+    /// Подразделения ([] — вся школа); старые серверы поле не присылают.
+    var division_ids: [Int]? = nil
 
     var imageURL: URL? {
         CommunityConstants.resolveImageUrl(image_url)
@@ -414,6 +420,9 @@ struct CommunityPromoFormData: Hashable {
     var startsAt = ""
     var endsAt = ""
     var status = "published"
+    /// «Для кого»: выбор в форме и итоговое значение (nil — не отправлять).
+    var divisionAudience = DivisionAudience()
+    var divisionIDs: [Int]?
 
     init() {}
 
@@ -421,6 +430,8 @@ struct CommunityPromoFormData: Hashable {
         guard let promo else {
             return
         }
+
+        divisionAudience = DivisionAudience(divisionIDs: promo.division_ids)
 
         title = promo.title
         body = promo.body
@@ -440,7 +451,7 @@ struct CommunityPromoFormData: Hashable {
     }
 
     var bodyDictionary: [String: Any] {
-        [
+        var result: [String: Any] = [
             "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
             "body": body.trimmingCharacters(in: .whitespacesAndNewlines),
             "image_url": cleanOptional(imageURL) as Any,
@@ -450,6 +461,8 @@ struct CommunityPromoFormData: Hashable {
             "ends_at": cleanOptional(endsAt) as Any,
             "status": status
         ]
+        result.setDivisionIDs(divisionIDs)
+        return result
     }
 
     private func cleanOptional(_ value: String) -> String? {
@@ -468,6 +481,9 @@ struct CommunityNeedFormData: Hashable {
     var goalText = ""
     var status = "active"
     var priority = 100
+    /// «Для кого»: выбор в форме и итоговое значение (nil — не отправлять).
+    var divisionAudience = DivisionAudience()
+    var divisionIDs: [Int]?
 
     init() {}
 
@@ -475,6 +491,8 @@ struct CommunityNeedFormData: Hashable {
         guard let need else {
             return
         }
+
+        divisionAudience = DivisionAudience(divisionIDs: need.division_ids)
 
         title = need.title
         description = need.description
@@ -494,7 +512,7 @@ struct CommunityNeedFormData: Hashable {
     }
 
     var bodyDictionary: [String: Any] {
-        [
+        var result: [String: Any] = [
             "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
             "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
             "image_url": cleanOptional(imageURL) as Any,
@@ -505,6 +523,8 @@ struct CommunityNeedFormData: Hashable {
             "status": status,
             "priority": priority
         ]
+        result.setDivisionIDs(divisionIDs)
+        return result
     }
 
     private func parsedDouble(_ value: String) -> Double? {

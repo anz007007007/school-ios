@@ -1482,6 +1482,8 @@ struct CommunityPromoFormView: View {
                     .pickerStyle(.segmented)
                 }
 
+                DivisionAudienceSection(audience: $formData.divisionAudience)
+
                 if let validationMessage {
                     Section {
                         Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -1520,6 +1522,7 @@ struct CommunityPromoFormView: View {
                     }
                 }
             }
+            .loadsDivisionAudience()
             .navigationTitle(promo == nil ? "Новое промо" : "Редактирование промо")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1622,6 +1625,8 @@ struct CommunityPromoFormView: View {
             return
         }
 
+        var formData = formData
+        formData.divisionIDs = formData.divisionAudience.payload(appState: appState)
         onSave(formData)
     }
 
@@ -1773,6 +1778,8 @@ struct CommunityNeedFormView: View {
                     .pickerStyle(.segmented)
                 }
 
+                DivisionAudienceSection(audience: $formData.divisionAudience)
+
                 if let validationMessage {
                     Section {
                         Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -1811,6 +1818,7 @@ struct CommunityNeedFormView: View {
                     }
                 }
             }
+            .loadsDivisionAudience()
             .navigationTitle(need == nil ? "Новая потребность" : "Потребность школы")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1898,6 +1906,8 @@ struct CommunityNeedFormView: View {
             return
         }
 
+        var formData = formData
+        formData.divisionIDs = formData.divisionAudience.payload(appState: appState)
         onSave(formData)
     }
 

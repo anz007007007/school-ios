@@ -24,6 +24,7 @@ final class AdminClassesViewModel: ObservableObject {
             || item.education_level.localizedCaseInsensitiveContains(query)
             || item.academic_year.localizedCaseInsensitiveContains(query)
             || item.curatorText.localizedCaseInsensitiveContains(query)
+            || (item.division_name?.localizedCaseInsensitiveContains(query) ?? false)
         }
     }
 
@@ -34,8 +35,9 @@ final class AdminClassesViewModel: ObservableObject {
 
         async let classesTask: Void = loadClasses(api: api, showLoading: false)
         async let teachersTask: Void = loadTeachers(api: api)
+        async let divisionsTask: Void = DivisionsStore.shared.load(api: api, force: true)
 
-        _ = await (classesTask, teachersTask)
+        _ = await (classesTask, teachersTask, divisionsTask)
 
         isLoading = false
     }
@@ -89,7 +91,8 @@ final class AdminClassesViewModel: ObservableObject {
         name: String,
         educationLevel: String,
         academicYear: String,
-        curatorTeacherID: Int
+        curatorTeacherID: Int,
+        divisionID: Int = 0
     ) async -> Bool {
         isSaving = true
         errorMessage = nil
@@ -106,6 +109,10 @@ final class AdminClassesViewModel: ObservableObject {
                 body["curator_teacher_id"] = curatorTeacherID
             } else {
                 body["curator_teacher_id"] = NSNull()
+            }
+
+            if divisionID != 0 {
+                body["division_id"] = divisionID
             }
 
             _ = try await sendRequest(
@@ -133,7 +140,9 @@ final class AdminClassesViewModel: ObservableObject {
         name: String,
         educationLevel: String,
         academicYear: String,
-        curatorTeacherID: Int
+        curatorTeacherID: Int,
+        divisionID: Int = 0,
+        originalDivisionID: Int? = nil
     ) async -> Bool {
         isSaving = true
         errorMessage = nil
@@ -158,6 +167,15 @@ final class AdminClassesViewModel: ObservableObject {
                 method: "PATCH",
                 body: body
             )
+
+            if divisionID != 0, divisionID != originalDivisionID {
+                _ = try await sendRequest(
+                    api: api,
+                    path: "/api/v1/divisions/classes/\(classID)",
+                    method: "PUT",
+                    body: ["division_ids": [divisionID]]
+                )
+            }
 
             successMessage = "Класс обновлён"
             await loadClasses(api: api)

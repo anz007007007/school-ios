@@ -26,6 +26,8 @@ struct ClubDTO: Codable, Identifiable, Hashable {
     let waiting_count: Int?
     let free_places: Int?
     let enrolled_names: String?
+    /// Подразделения ([] — вся школа); старые серверы поле не присылают.
+    let division_ids: [Int]?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, description, weekday, start_time, end_time, capacity
@@ -33,6 +35,7 @@ struct ClubDTO: Codable, Identifiable, Hashable {
         case teacher_name, teacher_id, teacher_user_id
         case teacher_phone, teacher_mobile_phone, teacher_contact_phone
         case status, enrolled_count, waiting_count, free_places, enrolled_names
+        case division_ids
     }
 
     init(from decoder: Decoder) throws {
@@ -68,6 +71,7 @@ struct ClubDTO: Codable, Identifiable, Hashable {
         waiting_count = try c.decodeIfPresent(Int.self, forKey: .waiting_count)
         free_places = try c.decodeIfPresent(Int.self, forKey: .free_places)
         enrolled_names = try c.decodeIfPresent(String.self, forKey: .enrolled_names)
+        division_ids = try? c.decodeIfPresent([Int].self, forKey: .division_ids)
     }
 
     var availableSpots: Int {
@@ -172,6 +176,8 @@ struct ClubFormData: Hashable {
     let paymentType: String
     let teacherID: Int
     let status: String
+    /// «Для кого»: nil — не менять, [] — вся школа.
+    var divisionIDs: [Int]? = nil
 }
 
 struct ClubStudentsListResponseDTO: Codable {

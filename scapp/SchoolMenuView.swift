@@ -158,7 +158,8 @@ struct SchoolMenuView: View {
                             menuDate: String(formData.menuDate),
                             mealType: String(formData.mealType),
                             dishID: formData.dishID,
-                            classID: formData.classID
+                            classID: formData.classID,
+                            divisionIDs: formData.divisionIDs
                         )
 
                         Task { @MainActor in
@@ -185,7 +186,8 @@ struct SchoolMenuView: View {
                             menuDate: String(formData.menuDate),
                             mealType: String(formData.mealType),
                             dishID: formData.dishID,
-                            classID: formData.classID
+                            classID: formData.classID,
+                            divisionIDs: formData.divisionIDs
                         )
 
                         Task { @MainActor in

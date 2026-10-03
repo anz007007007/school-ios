@@ -21,6 +21,8 @@ struct EventTimelineDTO: Codable, Identifiable, Hashable {
     let declined_count: Int
     let maybe_count: Int?
     let participant_classes_names: String?
+    /// Подразделения события ([] — вся школа); старые серверы поле не присылают.
+    var division_ids: [Int]? = nil
 
     /// Классы для формы: один класс приходит в class_id, для нескольких — только названия классов участников.
     func formClassIDs(classes: [EventClassFilterDTO]) -> [Int] {
@@ -104,6 +106,8 @@ struct EventFormData: Hashable {
     let description: String
     let classIDs: [Int]
     let studentIDs: [Int]
+    /// «Для кого»: nil — не менять, [] — вся школа.
+    var divisionIDs: [Int]? = nil
 }
 
 struct EventParticipantsListResponseDTO: Codable {

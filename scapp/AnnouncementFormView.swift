@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AnnouncementFormView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
 
     let audiences: [(code: String, title: String)]
     let isSaving: Bool
@@ -13,6 +14,7 @@ struct AnnouncementFormView: View {
     @State private var targetAudience: String = "all"
     @State private var isImportant = false
     @State private var validationMessage: String?
+    @State private var divisionAudience = DivisionAudience()
 
     var body: some View {
         NavigationStack {
@@ -40,6 +42,8 @@ struct AnnouncementFormView: View {
                     Toggle("Важное", isOn: $isImportant)
                 }
 
+                DivisionAudienceSection(audience: $divisionAudience)
+
                 if let validationMessage {
                     Section {
                         Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -58,6 +62,7 @@ struct AnnouncementFormView: View {
                     }
                 }
             }
+            .loadsDivisionAudience()
             .navigationTitle("Новое объявление")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -104,7 +109,8 @@ struct AnnouncementFormView: View {
             title: cleanTitle,
             body: cleanBody,
             targetAudience: targetAudience,
-            isImportant: isImportant
+            isImportant: isImportant,
+            divisionIDs: divisionAudience.payload(appState: appState)
         )
 
         onSave(formData)

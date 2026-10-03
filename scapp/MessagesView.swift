@@ -59,6 +59,10 @@ struct MessagesView: View {
                 viewModel.currentUserID = appState.currentUser?.id
 
                 await viewModel.loadInitialData(api: appState.api)
+
+                if appState.canChooseDivisionAudience {
+                    await DivisionsStore.shared.load(api: appState.api)
+                }
             }
             .onChange(of: appState.tabReselectToken[.messages]) {
                 Task {
@@ -220,7 +224,8 @@ struct MessagesView: View {
                             title: String(formData.title),
                             body: String(formData.body),
                             targetAudience: String(formData.targetAudience),
-                            isImportant: formData.isImportant
+                            isImportant: formData.isImportant,
+                            divisionIDs: formData.divisionIDs
                         )
 
                         Task { @MainActor in
@@ -571,6 +576,8 @@ struct AnnouncementRowView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+
+                DivisionAudienceLabel(divisionIDs: announcement.division_ids)
 
                 HStack {
                     Label(audienceTitle, systemImage: "person.3.fill")

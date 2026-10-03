@@ -25,6 +25,7 @@ struct ClubFormView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
 
     let mode: Mode
     let club: ClubDTO?
@@ -45,6 +46,7 @@ struct ClubFormView: View {
     @State private var teacherID: Int
     @State private var status: String
     @State private var validationMessage: String?
+    @State private var divisionAudience: DivisionAudience
 
     init(
         mode: Mode,
@@ -73,6 +75,7 @@ struct ClubFormView: View {
         _paymentType = State(initialValue: ClubsViewModel.normalizedPricePeriod(club?.paymentTypeValue) ?? "month")
         _teacherID = State(initialValue: initialTeacherID)
         _status = State(initialValue: club?.status ?? "active")
+        _divisionAudience = State(initialValue: DivisionAudience(divisionIDs: club?.division_ids))
     }
 
     var body: some View {
@@ -82,6 +85,7 @@ struct ClubFormView: View {
                 teacherSection
                 paymentSection
                 statusSection
+                DivisionAudienceSection(audience: $divisionAudience)
 
                 if let validationMessage {
                     Section {
@@ -102,6 +106,7 @@ struct ClubFormView: View {
                 }
             }
             .appThemedForm()
+            .loadsDivisionAudience()
             .navigationTitle(mode.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -264,7 +269,8 @@ struct ClubFormView: View {
             priceAmount: paymentType == "free" ? "0" : (cleanPriceAmount.isEmpty ? "0" : cleanPriceAmount),
             paymentType: paymentType,
             teacherID: teacherID,
-            status: status
+            status: status,
+            divisionIDs: divisionAudience.payload(appState: appState)
         )
 
         onSave(formData)

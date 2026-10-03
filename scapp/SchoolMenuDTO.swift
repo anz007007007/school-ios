@@ -90,6 +90,8 @@ struct WeeklyMenuItemDTO: Codable, Identifiable, Hashable {
     let calories: Int?
     let allergens: String?
     let price_amount: String?
+    /// Подразделения ([] — вся школа); старые серверы поле не присылают.
+    var division_ids: [Int]? = nil
 }
 
 struct WeeklyMenuItemFormData: Hashable {
@@ -97,6 +99,8 @@ struct WeeklyMenuItemFormData: Hashable {
     let mealType: String
     let dishID: Int
     let classID: Int?
+    /// «Для кого» (только для позиций без класса): nil — не менять, [] — вся школа.
+    var divisionIDs: [Int]? = nil
 }
 
 struct WeeklyMenuItemCreateRequestDTO: Codable {
