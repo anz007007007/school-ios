@@ -200,8 +200,10 @@ struct DashboardView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundStyle(AppTheme.heading.opacity(0.78))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 // Код калитки — небольшая плашка рядом с ролью, только если задан.
                 if let gateCode = viewModel.mobileConfig?.gate_code, !gateCode.isEmpty {
