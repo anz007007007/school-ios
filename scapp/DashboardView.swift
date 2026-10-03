@@ -102,6 +102,10 @@ struct DashboardView: View {
                 isUserRefreshing = false
             }
             .task {
+                // Камеры — отдельно и без ожидания: иконка в шапке не должна задерживать
+                // остальную загрузку главной и не показывает ошибку, если не пришла вовремя.
+                viewModel.loadCamerasIfNeeded(api: appState.api)
+
                 guard !didLoadInitialDashboard else {
                     return
                 }
@@ -217,6 +221,23 @@ struct DashboardView: View {
                     .clipShape(Capsule())
                     .accessibilityLabel("Код калитки \(gateCode)")
                     .fixedSize()
+                }
+
+                // Иконка «Камеры» рядом с калиткой — только если пользователю видна хотя бы
+                // одна камера; список подгружается лениво в .task и не блокирует шапку.
+                if viewModel.hasVisibleCameras {
+                    NavigationLink {
+                        LazyView { CamerasView() }
+                    } label: {
+                        Image(systemName: "video.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.heading)
+                            .padding(8)
+                            .background(Color.white.opacity(0.30))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Камеры видеонаблюдения")
                 }
 
                 NavigationLink {

@@ -24,6 +24,16 @@ final class DashboardViewModel: ObservableObject {
     @Published var hasLoadedInitialData = false
     @Published var errorMessage: String?
 
+    /// Камеры видеонаблюдения, доступные пользователю — грузятся лениво и отдельно
+    /// от остальной шапки: нужны только чтобы решить, показывать ли иконку камеры.
+    @Published var cameras: [CameraDTO] = []
+    @Published var hasLoadedCameras = false
+    private var camerasLoadTask: Task<Void, Never>?
+
+    var hasVisibleCameras: Bool {
+        !cameras.isEmpty
+    }
+
     private var loadGeneration = UUID()
     /// Поколение загрузок, зависящих от выбранного ребёнка (оценки, счётчик ДЗ, итоговые).
     /// Отдельно от `loadGeneration`, чтобы выбор ребёнка не обрывал общую загрузку главной.
@@ -36,6 +46,7 @@ final class DashboardViewModel: ObservableObject {
         studentGradesTask?.cancel()
         homeworkCountTask?.cancel()
         calculatedGradesTask?.cancel()
+        camerasLoadTask?.cancel()
     }
 
     var birthdays: [DashboardBirthdayDTO] {
@@ -558,6 +569,43 @@ final class DashboardViewModel: ObservableObject {
             }
 
             dashboardHomeworkIncompleteCount = nil
+        }
+    }
+
+    /// Лениво грузит список камер (один раз), только чтобы решить, показывать ли иконку
+    /// в шапке. Не блокирует загрузку главной и не показывает errorMessage при неудаче —
+    /// иконка просто не появится, пользователь всегда может открыть «Камеры» из другого места.
+    func loadCamerasIfNeeded(api: SchoolAPI) {
+        guard !hasLoadedCameras, camerasLoadTask == nil else {
+            return
+        }
+
+        camerasLoadTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let response = try await APIRequestService.shared.decode(
+                    CamerasListResponseDTO.self,
+                    api: api,
+                    path: "/api/v1/cameras",
+                    method: "GET",
+                    logPrefix: "DASHBOARD CAMERAS"
+                )
+
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                cameras = response.items
+                hasLoadedCameras = true
+            } catch {
+                // Тихо: отсутствие камер в шапке не критично, сам экран «Камеры»
+                // при необходимости покажет понятную ошибку и кнопку «Повторить».
+            }
+
+            camerasLoadTask = nil
         }
     }
 
