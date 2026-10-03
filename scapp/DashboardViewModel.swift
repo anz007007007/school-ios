@@ -265,9 +265,9 @@ final class DashboardViewModel: ObservableObject {
             if let resolvedStudents {
                 parentStudents = resolvedStudents
                 hasLoadedStudents = true
-            } else if isParent {
+            } else if isParent && !Task.isCancelled {
                 // Список детей не пришёл ни из одного источника — это ошибка загрузки,
-                // а не «детей нет».
+                // а не «детей нет». Отменённая загрузка ошибкой не считается.
                 errorMessage = "Не удалось загрузить список детей. Проверьте подключение к интернету и повторите."
             }
 

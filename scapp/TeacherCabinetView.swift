@@ -2,6 +2,9 @@ import SwiftUI
 
 struct TeacherCabinetView: View {
     @EnvironmentObject private var appState: AppState
+    /// false — экран открыт переходом из другого стека (главная): свой NavigationStack
+    /// дал бы вторую панель навигации поверх содержимого.
+    var embedInNavigationStack = true
     @StateObject private var viewModel = TeacherCabinetViewModel()
 
     @State private var selectedSection: TeacherSection = .journal
@@ -54,7 +57,16 @@ struct TeacherCabinetView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if embedInNavigationStack {
+            NavigationStack {
+                cabinetContent
+            }
+        } else {
+            cabinetContent
+        }
+    }
+
+    private var cabinetContent: some View {
             Group {
                 if viewModel.isLoading && viewModel.classes.isEmpty {
                     VStack(spacing: 16) {
@@ -81,7 +93,8 @@ struct TeacherCabinetView: View {
                 }
             }
             .navigationTitle(appState.isAdmin ? "Журнал школы" : "Кабинет учителя")
-            .navigationBarTitleDisplayMode(.large)
+            // Как на остальных экранах: крупный заголовок занимал полэкрана и наезжал на содержимое.
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 await viewModel.loadAll(api: appState.api)
 
@@ -211,7 +224,6 @@ struct TeacherCabinetView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
-        }
     }
 
     private var headerView: some View {

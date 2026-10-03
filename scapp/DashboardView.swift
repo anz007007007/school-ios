@@ -92,8 +92,13 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
                 isUserRefreshing = true
-                await reloadDashboard(force: true)
-                await appState.refreshUnreadNotificationsBySection()
+                // Отдельная задача: SwiftUI отменяет задачу refreshable, если список
+                // перерисовывается во время загрузки, — запросы обрывались, и главная
+                // показывала «Ошибка загрузки», хотя «Повторить» срабатывало.
+                await Task {
+                    await reloadDashboard(force: true)
+                    await appState.refreshUnreadNotificationsBySection()
+                }.value
                 isUserRefreshing = false
             }
             .task {
@@ -597,7 +602,7 @@ struct DashboardView: View {
         case .portfolio:
             PortfolioView()
         case .teacher:
-            TeacherCabinetView()
+            TeacherCabinetView(embedInNavigationStack: false)
         case .analytics:
             AnalyticsView()
         case .admin:
@@ -989,7 +994,7 @@ struct DashboardView: View {
 
                     if appState.canOpenTeacherCabinet {
                         NavigationLink {
-                            LazyView { TeacherCabinetView() }
+                            LazyView { TeacherCabinetView(embedInNavigationStack: false) }
                         } label: {
                             FeatureCardView(
                                 title: "Учителю",
