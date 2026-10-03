@@ -361,8 +361,6 @@ struct AdminEditParentView: View {
         NavigationStack {
             Form {
                 Section("Данные родителя") {
-                    LabeledContent("ID родителя", value: "\(currentParent.id)")
-                    LabeledContent("ID пользователя", value: "\(currentParent.user_id)")
                     LabeledContent("Логин", value: currentParent.login)
 
                     TextField("ФИО", text: $formData.fullName)
@@ -731,7 +729,7 @@ struct AttachStudentToParentView: View {
                                             .font(.headline)
                                             .foregroundStyle(AppTheme.text)
 
-                                        Text("ID: \(student.id)")
+                                        Text(student.classTitle)
                                             .font(.caption)
                                             .foregroundStyle(AppTheme.muted)
                                     }
@@ -850,9 +848,11 @@ struct AdminParentMessageTeachersView: View {
                                     Text(teacher.full_name)
                                         .font(.headline)
 
-                                    Text("teacher_id: \(teacher.teacher_id), user_id: \(teacher.user_id)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    if let position = teacher.position, !position.isEmpty {
+                                        Text(position)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                             .tint(AppTheme.control)

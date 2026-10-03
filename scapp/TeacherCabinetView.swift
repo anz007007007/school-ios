@@ -1927,8 +1927,6 @@ struct TeacherHomeworkCardView: View {
                 if let createdAt = item.created_at, !createdAt.isEmpty {
                     Label("Создано: \(AppDateFormatter.dateTime(createdAt))", systemImage: "clock")
                 }
-
-                Label("ID: \(item.id)", systemImage: "number")
             }
             .font(.caption)
             .foregroundStyle(.secondary)

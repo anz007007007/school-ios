@@ -620,6 +620,37 @@ struct FinanceAdminView: View {
         }
     }
 
+    private func bankImportFallbackTitle(_ item: BankStatementImportDTO) -> String {
+        guard let createdAt = item.created_at, !createdAt.isEmpty else {
+            return "Выписка"
+        }
+
+        return "Выписка от \(AppDateFormatter.date(createdAt))"
+    }
+
+    private func bankStatementStatusTitle(_ value: String?) -> String {
+        switch value?.lowercased() {
+        case .none, .some(""):
+            return "—"
+        case "new":
+            return "Новая"
+        case "processing":
+            return "Обрабатывается"
+        case "completed":
+            return "Обработана"
+        case "failed":
+            return "Ошибка"
+        case "matched":
+            return "Сопоставлена"
+        case "unmatched":
+            return "Не сопоставлена"
+        case "duplicate_import":
+            return "Повторный импорт"
+        case .some(let raw):
+            return raw
+        }
+    }
+
     private var bankStatementsSection: some View {
         Section {
             Button {
@@ -644,11 +675,11 @@ struct FinanceAdminView: View {
                 DisclosureGroup("Импорты: \(viewModel.bankStatementImports.count)") {
                     ForEach(viewModel.bankStatementImports) { item in
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(item.filename ?? "Импорт #\(item.id)")
+                            Text(item.filename ?? bankImportFallbackTitle(item))
                                 .font(.headline)
 
                             HStack {
-                                Text(item.status ?? "—")
+                                Text(bankStatementStatusTitle(item.status))
                                 Text("Операций: \(item.operations_count ?? 0)")
                                 Text("Сопоставлено: \(item.matched_count ?? 0)")
                             }
@@ -676,7 +707,7 @@ struct FinanceAdminView: View {
 
                                 Spacer()
 
-                                Text(item.status ?? "—")
+                                Text(bankStatementStatusTitle(item.status))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

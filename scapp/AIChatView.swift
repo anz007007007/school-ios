@@ -356,7 +356,7 @@ struct AIChatView: View {
                     .foregroundStyle(AppTheme.warning)
 
                 if missing.isEmpty {
-                    Text("Backend вернул status = need_clarification, но все основные поля выглядят заполненными. Проверьте текст сообщения сервера выше или уточните команду более явно.")
+                    Text("ИИ-помощник просит уточнить команду. Прочитайте сообщение выше или сформулируйте команду подробнее.")
                         .font(.caption)
                         .foregroundStyle(AppTheme.warning)
                         .fixedSize(horizontal: false, vertical: true)
@@ -423,11 +423,11 @@ struct AIChatView: View {
                 result.append("Не указан срок домашнего задания.")
             }
         } else {
-            result.append("Неподдерживаемый тип команды: \(command.type).")
+            result.append("Этот тип команды не поддерживается.")
         }
 
         if !command.isReady {
-            result.append(command.message ?? "Backend пометил команду как неготовую.")
+            result.append(command.message ?? "Команда ещё не готова к выполнению.")
         }
 
         return result
@@ -668,7 +668,7 @@ private struct AITeacherCommandPreviewCard: View {
                 previewRow("Описание", command.homework_description, isMissing: isBlank(command.homework_description))
                 previewRow("Срок", command.formattedDueDate, isMissing: isBlank(command.due_date))
             } else {
-                previewRow("Тип команды", command.type, isMissing: false)
+                previewRow("Команда", "Не поддерживается", isMissing: false)
             }
 
             missingFieldsView

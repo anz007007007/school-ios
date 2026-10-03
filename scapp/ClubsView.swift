@@ -419,6 +419,14 @@ struct ClubsView: View {
         .listRowBackground(Color.clear)
     }
 
+    private func conflictTitle(_ conflict: ClubsViewModel.ClubConflictGroup) -> String {
+        guard let club = conflict.clubs.first else {
+            return ""
+        }
+
+        return "\(viewModel.weekdayTitle(club.weekday)), \(club.start_time)–\(club.end_time)"
+    }
+
     private var conflictsView: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Кружки в одно и то же время", systemImage: "exclamationmark.triangle.fill")
@@ -427,7 +435,7 @@ struct ClubsView: View {
 
             ForEach(viewModel.timeConflicts) { conflict in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(conflict.key)
+                    Text(conflictTitle(conflict))
                         .font(.subheadline)
                         .fontWeight(.semibold)
 

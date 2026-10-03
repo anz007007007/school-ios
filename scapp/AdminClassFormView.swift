@@ -57,7 +57,7 @@ struct AdminClassFormView: View {
                 }
                 .pickerStyle(.navigationLink)
 
-                Text("Куратор должен появляться у родителей и учеников в списке получателей сообщений. Если после назначения он не появляется — нужно добавить куратора в ответ API `/api/v1/messages/contacts`.")
+                Text("Куратор появится у родителей и учеников класса в списке получателей сообщений.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

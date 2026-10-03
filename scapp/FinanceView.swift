@@ -1016,17 +1016,15 @@ struct InvoiceDetailView: View {
                     }
                 }
 
-                Section("Система") {
-                    LabeledContent("ID счёта", value: "\(invoice.id)")
-                    LabeledContent("ID ученика", value: "\(invoice.student_id)")
-                    LabeledContent("Статус", value: invoice.status)
+                if invoice.created_at != nil || invoice.updated_at != nil {
+                    Section("Даты") {
+                        if let createdAt = invoice.created_at {
+                            LabeledContent("Создан", value: AppDateFormatter.dateTime(createdAt))
+                        }
 
-                    if let createdAt = invoice.created_at {
-                        LabeledContent("Создан", value: AppDateFormatter.dateTime(createdAt))
-                    }
-
-                    if let updatedAt = invoice.updated_at {
-                        LabeledContent("Обновлён", value: AppDateFormatter.dateTime(updatedAt))
+                        if let updatedAt = invoice.updated_at {
+                            LabeledContent("Обновлён", value: AppDateFormatter.dateTime(updatedAt))
+                        }
                     }
                 }
             }

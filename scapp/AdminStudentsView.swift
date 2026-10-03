@@ -362,10 +362,9 @@ struct AdminEditStudentView: View {
                 )
 
                 Section("Информация") {
-                    LabeledContent("ID ученика", value: "\(student.id)")
                     LabeledContent("Текущий класс", value: student.classTitle)
 
-                    Text("Логин и пароль ученику создаёт родитель в своём профиле. Сервер не разрешает администратору создавать учётные данные ученика через этот endpoint.")
+                    Text("Логин и пароль ученику создаёт родитель в своём профиле. Администратор не может создать учётные данные ученика.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

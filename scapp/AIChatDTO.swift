@@ -146,7 +146,7 @@ struct AITeacherCommandApplyResultDTO: Decodable, Identifiable {
         case "create_homework":
             return "Домашнее задание"
         default:
-            return type
+            return "Команда"
         }
     }
 
@@ -307,7 +307,7 @@ struct AITeacherCommandDTO: Codable, Identifiable, Equatable {
         case "create_homework":
             return "Домашнее задание"
         default:
-            return type.isEmpty ? "Команда" : type
+            return "Команда"
         }
     }
 

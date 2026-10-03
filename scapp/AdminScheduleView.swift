@@ -347,10 +347,6 @@ struct AdminEditScheduleLessonView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("ID") {
-                    LabeledContent("ID урока", value: "\(lesson.id)")
-                }
-
                 AdminScheduleFormView(
                     formData: $formData,
                     classes: viewModel.classes,

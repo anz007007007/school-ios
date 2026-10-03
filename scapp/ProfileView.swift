@@ -112,25 +112,8 @@ struct ProfileView: View {
                     }
 
                     Section("Данные пользователя") {
-                        LabeledContent("ID", value: "\(user.id)")
                         LabeledContent("Логин", value: user.login)
                         LabeledContent("Роль", value: user.role_name)
-                        LabeledContent("Код роли", value: user.role_code)
-                        LabeledContent("Активен", value: user.is_active ? "Да" : "Нет")
-                    }
-
-                    Section("Права доступа") {
-                        if user.permissions.isEmpty {
-                            Text("Нет прав")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            DisclosureGroup("Показать права: \(user.permissions.count)") {
-                                ForEach(user.permissions, id: \.self) { permission in
-                                    Text(permission)
-                                        .font(.footnote)
-                                }
-                            }
-                        }
                     }
 
                     Section("Безопасность") {

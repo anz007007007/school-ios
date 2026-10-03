@@ -57,7 +57,6 @@ struct PushDeviceDTO: Codable, Identifiable, Hashable {
 
     var subtitle: String {
         let values = [
-            environmentTitle,
             lastSeenTitle
         ]
         .compactMap { $0 }
@@ -70,39 +69,12 @@ struct PushDeviceDTO: Codable, Identifiable, Hashable {
         return values.joined(separator: " · ")
     }
 
-    var tokenPreview: String {
-        guard let device_token, !device_token.isEmpty else {
-            return "token отсутствует"
-        }
-
-        if device_token.count <= 16 {
-            return device_token
-        }
-
-        return "\(device_token.prefix(8))…\(device_token.suffix(6))"
-    }
-
-    private var environmentTitle: String? {
-        let value = apns_environment ?? environment
-
-        switch value?.lowercased() {
-        case "sandbox":
-            return "Тестовая среда"
-        case "production":
-            return "Production"
-        case .some(let value):
-            return value
-        case .none:
-            return nil
-        }
-    }
-
     private var lastSeenTitle: String? {
         guard let value = last_seen_at ?? updated_at ?? created_at else {
             return nil
         }
 
-        return "Активность: \(value)"
+        return "Активность: \(AppDateFormatter.dateTime(value))"
     }
 }
 

@@ -319,10 +319,6 @@ struct AdminEditTermView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("ID") {
-                    LabeledContent("ID периода", value: "\(term.id)")
-                }
-
                 AdminTermFormFieldsView(formData: $formData)
 
                 Section("Опасная зона") {

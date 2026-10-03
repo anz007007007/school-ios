@@ -84,7 +84,9 @@ struct NotificationSettingsView: View {
             } else {
                 authorizationStatusView
 
-                if let message = pushService.lastRegistrationMessage,
+                // Технический журнал регистрации (APNs/FCM) — только для администратора, для поддержки.
+                if appState.isAdmin,
+                   let message = pushService.lastRegistrationMessage,
                    !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(message)
                         .font(.caption)
@@ -96,7 +98,7 @@ struct NotificationSettingsView: View {
                     Label("Ошибка push", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(AppTheme.warning)
 
-                    Text(pushError)
+                    Text(appState.isAdmin ? pushError : "Не удалось подключить уведомления на этом устройстве. Попробуйте позже или нажмите «Проверить регистрацию».")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -479,11 +481,6 @@ struct PushDeviceSettingsRowView: View {
                     Text(device.subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    Text("ID: \(device.id) · \(device.tokenPreview)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
 
                 Spacer()

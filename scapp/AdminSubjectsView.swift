@@ -149,10 +149,6 @@ struct AdminSubjectRowView: View {
                 Text(subject.name)
                     .font(.headline)
                     .foregroundStyle(AppTheme.text)
-
-                Text("ID: \(subject.id)")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.muted)
             }
 
             Spacer()
@@ -278,7 +274,6 @@ struct AdminEditSubjectView: View {
         NavigationStack {
             Form {
                 Section("Предмет") {
-                    LabeledContent("ID", value: "\(subject.id)")
                     TextField("Название", text: $name)
                 }
 

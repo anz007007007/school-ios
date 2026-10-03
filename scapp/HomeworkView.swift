@@ -748,8 +748,6 @@ struct HomeworkDetailView: View {
                     if let completedAt = homework.completed_at, homework.isCompleted {
                         LabeledContent("Выполнено в", value: AppDateFormatter.dateTime(completedAt))
                     }
-
-                    LabeledContent("ID задания", value: "\(homework.id)")
                 }
 
                 Section("Выполнение") {

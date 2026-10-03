@@ -1468,7 +1468,7 @@ struct CommunityPromoFormView: View {
                     TextField("Дата начала или пусто", text: $formData.startsAt)
                     TextField("Дата окончания или пусто", text: $formData.endsAt)
 
-                    Text("Даты можно оставить пустыми. Если заполняете, используйте формат backend, например 2026-07-18T12:00:00.")
+                    Text("Даты можно оставить пустыми. Если заполняете, укажите дату и время в формате 2026-07-18T12:00:00.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

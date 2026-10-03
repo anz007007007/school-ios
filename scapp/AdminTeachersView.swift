@@ -328,8 +328,6 @@ struct AdminEditTeacherView: View {
         NavigationStack {
             Form {
                 Section("Данные учителя") {
-                    LabeledContent("ID учителя", value: "\(currentTeacher.id)")
-                    LabeledContent("ID пользователя", value: "\(currentTeacher.user_id)")
                     LabeledContent("Логин", value: currentTeacher.login)
 
                     TextField("ФИО", text: $formData.fullName)
@@ -351,10 +349,6 @@ struct AdminEditTeacherView: View {
                                     Text("Класс: \(assignment.class_name)")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
-
-                                    Text("class_id: \(assignment.class_id)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
 
                                     if isSubjectOrExtraAssignment(assignment) {
                                         Text("Назначение связано с предметом или доп. занятием")

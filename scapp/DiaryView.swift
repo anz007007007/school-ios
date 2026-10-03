@@ -720,9 +720,7 @@ struct DiaryGradeDetailsSheetView: View {
                 }
 
                 if grade.createdAtText != nil || grade.updatedAtText != nil {
-                    Section("Служебная информация") {
-                        detailRow(title: "ID оценки", value: "\(grade.id)")
-
+                    Section("История") {
                         if let createdAt = grade.createdAtText {
                             detailRow(title: "Создано", value: createdAt)
                         }

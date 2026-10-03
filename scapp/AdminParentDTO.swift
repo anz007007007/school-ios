@@ -43,12 +43,6 @@ struct AdminParentMessageTeacherDTO: Codable, Identifiable, Hashable {
     }
 
     var displaySubtitle: String {
-        let cleanPosition = position?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if cleanPosition.isEmpty {
-            return "ID учителя: \(id), ID пользователя: \(user_id)"
-        }
-
-        return "\(cleanPosition) · ID учителя: \(id), ID пользователя: \(user_id)"
+        position?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
